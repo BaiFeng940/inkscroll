@@ -1,0 +1,333 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>inkScroll — 本地漫画 / 文档阅读器</title>
+<meta name="description" content="inkScroll 是一个 Android 优先的本地漫画与文档阅读器：压缩包按需解压、虚拟长页无缝拼接、120Hz 高刷新率适配，图片永不被拉伸或裁切。">
+<link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>📖</text></svg>">
+<style>
+  :root{
+    --bg:#0b0d12; --bg2:#12151d; --card:#171b25; --line:#242a38;
+    --fg:#e8ecf4; --dim:#98a2b8; --dim2:#6b7488;
+    --accent:#5b7cfa; --accent2:#8b6bfa; --ok:#35d07f; --warn:#ffc53d;
+    --radius:16px;
+  }
+  *{box-sizing:border-box;margin:0;padding:0}
+  html{scroll-behavior:smooth}
+  body{
+    background:var(--bg); color:var(--fg);
+    font-family:-apple-system,BlinkMacSystemFont,"Segoe UI","PingFang SC","Hiragino Sans GB","Microsoft YaHei",sans-serif;
+    line-height:1.65; -webkit-font-smoothing:antialiased;
+  }
+  a{color:var(--accent);text-decoration:none}
+  a:hover{text-decoration:underline}
+  .wrap{max-width:1100px;margin:0 auto;padding:0 22px}
+
+  /* ── 顶栏 ── */
+  header{
+    position:sticky;top:0;z-index:50;
+    background:rgba(11,13,18,.82);backdrop-filter:blur(14px);
+    border-bottom:1px solid var(--line);
+  }
+  .nav{display:flex;align-items:center;gap:26px;height:62px}
+  .brand{display:flex;align-items:center;gap:10px;font-weight:700;font-size:17px;letter-spacing:.2px}
+  .brand .dot{
+    width:26px;height:26px;border-radius:8px;flex:0 0 auto;
+    background:linear-gradient(135deg,var(--accent),var(--accent2));
+    display:grid;place-items:center;font-size:14px;
+  }
+  .nav .sp{flex:1}
+  .nav a.lnk{color:var(--dim);font-size:14px}
+  .nav a.lnk:hover{color:var(--fg);text-decoration:none}
+  @media(max-width:720px){.nav a.lnk{display:none}}
+
+  /* ── Hero ── */
+  .hero{
+    padding:76px 0 56px;position:relative;overflow:hidden;
+    background:
+      radial-gradient(900px 420px at 18% -8%, rgba(91,124,250,.20), transparent 62%),
+      radial-gradient(760px 380px at 88% 4%, rgba(139,107,250,.16), transparent 60%);
+  }
+  .hero h1{font-size:clamp(34px,5.4vw,54px);line-height:1.14;letter-spacing:-.5px;font-weight:800}
+  .grad{background:linear-gradient(100deg,var(--accent),var(--accent2));-webkit-background-clip:text;background-clip:text;color:transparent}
+  .hero p.lead{margin-top:18px;font-size:clamp(15px,2vw,18px);color:var(--dim);max-width:660px}
+  .btns{margin-top:30px;display:flex;gap:12px;flex-wrap:wrap}
+  .btn{
+    display:inline-flex;align-items:center;gap:9px;
+    padding:13px 22px;border-radius:12px;font-weight:600;font-size:15px;
+    border:1px solid transparent;transition:transform .12s ease,opacity .12s ease;
+  }
+  .btn:hover{transform:translateY(-1px);text-decoration:none}
+  .btn.primary{background:linear-gradient(135deg,var(--accent),var(--accent2));color:#fff;box-shadow:0 8px 26px -10px rgba(91,124,250,.85)}
+  .btn.ghost{border-color:var(--line);color:var(--fg);background:var(--card)}
+  .meta{margin-top:20px;font-size:13px;color:var(--dim2);display:flex;gap:16px;flex-wrap:wrap}
+
+  /* ── 区块 ── */
+  section{padding:64px 0}
+  .eyebrow{
+    font-size:12px;font-weight:700;letter-spacing:1.6px;text-transform:uppercase;
+    color:var(--accent);margin-bottom:12px;
+  }
+  h2{font-size:clamp(24px,3.4vw,32px);font-weight:750;letter-spacing:-.3px}
+  .sub{color:var(--dim);margin-top:12px;max-width:720px}
+
+  /* ── 特色卡 ── */
+  .grid{display:grid;gap:16px;margin-top:34px}
+  .g3{grid-template-columns:repeat(auto-fit,minmax(272px,1fr))}
+  .card{
+    background:var(--card);border:1px solid var(--line);border-radius:var(--radius);
+    padding:22px;transition:border-color .15s ease,transform .15s ease;
+  }
+  .card:hover{border-color:#33405c;transform:translateY(-2px)}
+  .card .ico{font-size:22px;margin-bottom:10px}
+  .card h3{font-size:16px;font-weight:680;margin-bottom:7px}
+  .card p{font-size:14px;color:var(--dim)}
+
+  /* ── 截图 ── */
+  .shots{display:flex;gap:18px;overflow-x:auto;padding:34px 0 12px;scroll-snap-type:x mandatory}
+  .shots figure{flex:0 0 auto;scroll-snap-align:start;width:224px}
+  .shots img{
+    width:100%;border-radius:14px;border:1px solid var(--line);
+    background:#000;display:block;
+  }
+  .shots figcaption{margin-top:10px;font-size:12.5px;color:var(--dim2);text-align:center}
+
+  /* ── 对比表 ── */
+  table{width:100%;border-collapse:collapse;margin-top:28px;font-size:14px}
+  th,td{text-align:left;padding:12px 14px;border-bottom:1px solid var(--line)}
+  th{color:var(--dim2);font-weight:600;font-size:12.5px;text-transform:uppercase;letter-spacing:.7px}
+  td code{background:var(--bg2);padding:2px 7px;border-radius:6px;font-size:12.5px;color:#b9c4dc}
+  .ok{color:var(--ok);font-weight:650}
+  .no{color:#ff6b6b;font-weight:650}
+
+  /* ── 安装步骤 ── */
+  ol.steps{margin-top:26px;padding-left:0;list-style:none;counter-reset:s}
+  ol.steps li{
+    counter-increment:s;position:relative;padding:0 0 18px 44px;color:var(--dim);font-size:14.5px;
+  }
+  ol.steps li::before{
+    content:counter(s);position:absolute;left:0;top:0;
+    width:28px;height:28px;border-radius:9px;display:grid;place-items:center;
+    background:var(--bg2);border:1px solid var(--line);color:var(--accent);font-weight:700;font-size:13px;
+  }
+  ol.steps li strong{color:var(--fg)}
+  pre{
+    background:var(--bg2);border:1px solid var(--line);border-radius:10px;
+    padding:14px 16px;overflow-x:auto;font-size:13px;color:#c3cde3;
+    font-family:ui-monospace,SFMono-Regular,Menlo,Consolas,monospace;margin-top:10px;
+  }
+
+  footer{border-top:1px solid var(--line);padding:34px 0 46px;color:var(--dim2);font-size:13px}
+  footer .row{display:flex;justify-content:space-between;gap:18px;flex-wrap:wrap}
+</style>
+</head>
+<body>
+
+<header>
+  <div class="wrap nav">
+    <div class="brand"><span class="dot">📖</span> inkScroll</div>
+    <div class="sp"></div>
+    <a class="lnk" href="#features">功能</a>
+    <a class="lnk" href="#shots">截图</a>
+    <a class="lnk" href="#tech">技术</a>
+    <a class="lnk" href="#install">安装</a>
+    <a class="btn ghost" style="padding:8px 16px;font-size:13.5px" href="https://github.com/inkscroll/inkscroll">GitHub</a>
+  </div>
+</header>
+
+<div class="hero">
+  <div class="wrap">
+    <h1>把漫画放进口袋，<br><span class="grad">按需解压，一页不卡。</span></h1>
+    <p class="lead">
+      inkScroll 是一个 Android 优先的本地漫画 / 文档阅读器。
+      压缩包不解压整个文件、图片永远保持原始比例、多页无缝拼成一条长页，
+      并针对 120Hz 高刷屏做了适配。
+    </p>
+    <div class="btns">
+      <a class="btn primary" href="https://github.com/inkscroll/inkscroll/releases/latest">
+        ⬇ 下载 APK <span style="opacity:.75;font-weight:500">v0.1.0</span>
+      </a>
+      <a class="btn ghost" href="#tech">看看怎么实现的</a>
+    </div>
+    <div class="meta">
+      <span>Android 7.0+ (minSdk 24)</span>
+      <span>·</span>
+      <span>arm64-v8a / armeabi-v7a / x86_64</span>
+      <span>·</span>
+      <span>MIT 开源</span>
+    </div>
+  </div>
+</div>
+
+<section id="features">
+  <div class="wrap">
+    <div class="eyebrow">Features</div>
+    <h2>不只是"能看"</h2>
+    <p class="sub">每一条都对应一个真实踩过的坑，而不是功能清单上的凑数项。</p>
+
+    <div class="grid g3">
+      <div class="card">
+        <div class="ico">🗜️</div>
+        <h3>压缩包按需读取</h3>
+        <p>自己实现 ZIP 中央目录解析（含 Zip64），只解真正要显示的那一页；打开 1GB 的压缩包和打开 1MB 的一样快，不会一次性解压全部内容。</p>
+      </div>
+      <div class="card">
+        <div class="ico">📐</div>
+        <h3>原始比例，不裁不拉伸</h3>
+        <p>只给宽度约束、高度交给解码器决定。图片宽度撑满屏幕，高度按真实宽高比自动算出——同时做到不变形、不裁切、不留白。</p>
+      </div>
+      <div class="card">
+        <div class="ico">🧵</div>
+        <h3>虚拟长页无缝拼接</h3>
+        <p>上下滑动模式下，下一张的顶部就是上一张的底部，没有间隙也没有高度跳动——占位用嗅探到的真实比例撑开，加载完成不重排。</p>
+      </div>
+      <div class="card">
+        <div class="ico">⚡</div>
+        <h3>120Hz 高刷新率</h3>
+        <p>国产 ROM 默认把应用锁在 60Hz。inkScroll 主动申请显示模式 + 在绘制 Surface 上声明帧率，实测跑满 120fps（vsync 8.33ms）。</p>
+      </div>
+      <div class="card">
+        <div class="ico">📁</div>
+        <h3>真正可用的文件夹导入</h3>
+        <p>Android 11+ 的分区存储让常规方案彻底失效。这里直接用 SAF 原生读取内容并复制进应用目录，选完即用，还能按扩展名过滤。</p>
+      </div>
+      <div class="card">
+        <div class="ico">🔢</div>
+        <h3>按文件名自然排序</h3>
+        <p><code>2.jpg</code> 排在 <code>10.jpg</code> 前面，而不是字典序。导入前还能手动调整顺序，上移、下移、置顶都支持。</p>
+      </div>
+      <div class="card">
+        <div class="ico">🔍</div>
+        <h3>格式识别到位</h3>
+        <p>PNG / JPEG / GIF / WebP / BMP / ICO / AVIF / HEIC / QOI 头部解析，文件夹导入时用内容嗅探兜底，扩展名不对也能认出来。</p>
+      </div>
+      <div class="card">
+        <div class="ico">🎛️</div>
+        <h3>两种阅读模式</h3>
+        <p>左右翻页：拖动和点击两侧翻页同时可用，中间呼出菜单。上下滑动：适合条漫的连续长页。</p>
+      </div>
+      <div class="card">
+        <div class="ico">💾</div>
+        <h3>进度与设置在本地</h3>
+        <p>每本书独立记忆阅读模式与进度，全套设置本地持久化，不需要账号、不联网、不收集任何数据。</p>
+      </div>
+    </div>
+  </div>
+</section>
+
+<section id="shots" style="background:var(--bg2);border-block:1px solid var(--line)">
+  <div class="wrap">
+    <div class="eyebrow">Screenshots</div>
+    <h2>实机截图</h2>
+    <p class="sub">真机（vivo V2417A / Android 16）与模拟器实测，测试图带红/绿边框以便一眼看出有没有被裁切。</p>
+    <div class="shots">
+      <figure><img src="assets/shot-reader-120fps.png" alt="真机 120fps 阅读界面" loading="lazy"><figcaption>真机 120fps（左上角系统角标）</figcaption></figure>
+      <figure><img src="assets/shot-folder-import.png" alt="文件夹导入结果" loading="lazy"><figcaption>文件夹导入：12 张图立即渲染</figcaption></figure>
+      <figure><img src="assets/shot-horizontal.png" alt="左右翻页模式" loading="lazy"><figcaption>左右翻页：未超屏时居中</figcaption></figure>
+      <figure><img src="assets/shot-vertical.png" alt="上下滑动长页" loading="lazy"><figcaption>上下滑动：宽度撑满、顶部对齐</figcaption></figure>
+      <figure><img src="assets/shot-menu.png" alt="阅读菜单" loading="lazy"><figcaption>阅读菜单与模式切换</figcaption></figure>
+    </div>
+  </div>
+</section>
+
+<section id="tech">
+  <div class="wrap">
+    <div class="eyebrow">Engineering</div>
+    <h2>几个值得说的技术点</h2>
+    <p class="sub">这个项目踩过的坑比功能多。下面几条都有实测数据支撑。</p>
+
+    <table>
+      <thead><tr><th>问题</th><th>根因</th><th>解法</th></tr></thead>
+      <tbody>
+        <tr>
+          <td>图片永远加载不出来</td>
+          <td><code>whenComplete</code> 返回的代理 <code>Future</code> 不完成，<code>await</code> 永久挂起</td>
+          <td class="ok">清理逻辑放进 <code>finally</code>，直接返回原始 Future</td>
+        </tr>
+        <tr>
+          <td>上下滑动完全失效</td>
+          <td>注册了 <code>onDoubleTap</code> 后，双击识别器在 pointer down 时就抢占手势竞技场</td>
+          <td class="ok">滚动模式不注册双击，让 Drag 拿到手势</td>
+        </tr>
+        <tr>
+          <td>滑动持续卡顿</td>
+          <td>占位高度为 0，解码后才变真实高度，<code>RenderSliverList</code> 每次重排下方全部内容</td>
+          <td class="ok">占位直接用嗅探到的比例撑开，高度零变化</td>
+        </tr>
+        <tr>
+          <td>文件夹导入静默失败</td>
+          <td>Android 11+ 禁止授权存储根目录；<code>file_picker</code> 的路径转换在 API 30+ 被跳过</td>
+          <td class="ok">自研 SAF 插件，不转路径、直接读内容</td>
+        </tr>
+        <tr>
+          <td>高刷屏只有 60fps</td>
+          <td>应用从未调用 <code>Surface.setFrameRate</code>，系统保守给 60Hz</td>
+          <td class="ok">同时申请显示模式 + 在 Surface 上声明 120Hz</td>
+        </tr>
+        <tr>
+          <td>渲染死循环</td>
+          <td>在 <code>LayoutBuilder</code> 的 builder 里改状态并 <code>notifyListeners</code></td>
+          <td class="ok">build 期间不做任何副作用，重建推迟到帧末</td>
+        </tr>
+      </tbody>
+    </table>
+
+    <div class="grid g3" style="margin-top:34px">
+      <div class="card">
+        <h3>技术栈</h3>
+        <p>Flutter 3.47 / Dart 3.13，状态管理用 Provider + ChangeNotifier；
+           ZIP 解析自己写（只借用 <code>archive</code> 的 Inflate）；
+           文件夹导入用自研 Kotlin SAF 插件。</p>
+      </div>
+      <div class="card">
+        <h3>性能取舍</h3>
+        <p>解码宽度限制到屏幕物理宽（一页约 6MB 而不是 48MB）；
+           页缓存 32 项 / 128MB；进度通知做节流，滚动时不再每帧重建进度条。</p>
+      </div>
+      <div class="card">
+        <h3>设计文档</h3>
+        <p>仓库里的 <code>DESIGN.md</code> 记录了完整架构决策与取舍，
+           <code>README.md</code> 有每一轮修复的根因分析——包括那些失败的尝试。</p>
+      </div>
+    </div>
+  </div>
+</section>
+
+<section id="install" style="background:var(--bg2);border-block:1px solid var(--line)">
+  <div class="wrap">
+    <div class="eyebrow">Install</div>
+    <h2>安装</h2>
+    <ol class="steps">
+      <li>到 <a href="https://github.com/inkscroll/inkscroll/releases/latest">Releases</a> 下载对应架构的 APK。<br>
+          <strong>绝大多数手机选 <code>arm64-v8a</code></strong>；老设备选 <code>armeabi-v7a</code>；模拟器选 <code>x86_64</code>。</li>
+      <li>在手机上允许"安装未知来源应用"，然后点击 APK 安装。</li>
+      <li>打开 inkScroll，点右下角<strong>导入</strong>，选择文件夹 / 压缩包 / 图片。</li>
+      <li>想跑满 120Hz？在系统设置里为 inkScroll <strong>手动开启高刷新率</strong>——
+          这是 Android 与国产 ROM 的限制，应用无法绕过。</li>
+    </ol>
+
+    <p class="sub" style="margin-top:26px">从源码构建：</p>
+<pre>git clone https://github.com/inkscroll/inkscroll.git
+cd inkscroll
+flutter pub get
+flutter build apk --release --split-per-abi</pre>
+  </div>
+</section>
+
+<footer>
+  <div class="wrap row">
+    <div>
+      <strong style="color:var(--fg)">inkScroll</strong> · MIT License<br>
+      用 Flutter 写的本地阅读器，不联网、不上传任何数据。
+    </div>
+    <div>
+      <a href="https://github.com/inkscroll/inkscroll">源码</a> ·
+      <a href="https://github.com/inkscroll/inkscroll/releases">版本发布</a> ·
+      <a href="https://github.com/inkscroll/inkscroll/issues">反馈问题</a>
+    </div>
+  </div>
+</footer>
+
+</body>
+</html>

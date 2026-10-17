@@ -1,0 +1,76 @@
+name: Build & Release
+
+# 打 tag（例如 v0.1.0）时自动构建三个架构的 APK 并发布到 Releases。
+# 也可以手动触发（Actions 页面 → Run workflow）。
+on:
+  push:
+    tags:
+      - 'v*'
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '17'
+
+      - uses: subosito/flutter-action@v2
+        with:
+          flutter-version: '3.47.7'
+          channel: stable
+          cache: true
+
+      - name: 拉取依赖
+        run: flutter pub get
+
+      - name: 静态分析
+        run: flutter analyze --no-pub
+
+      - name: 单元测试
+        run: flutter test --no-pub
+
+      - name: 构建分架构 release APK
+        run: flutter build apk --release --split-per-abi
+
+      - name: 整理产物
+        run: |
+          mkdir -p out
+          cp build/app/outputs/flutter-apk/app-arm64-v8a-release.apk   out/inkscroll-0.1.0-arm64-v8a.apk
+          cp build/app/outputs/flutter-apk/app-armeabi-v7a-release.apk out/inkscroll-0.1.0-armeabi-v7a.apk
+          cp build/app/outputs/flutter-apk/app-x86_64-release.apk      out/inkscroll-0.1.0-x86_64.apk
+          ls -lh out
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: inkscroll-apks
+          path: out/*.apk
+
+      - name: 发布到 Releases
+        if: startsWith(github.ref, 'refs/tags/v')
+        uses: softprops/action-gh-release@v2
+        with:
+          files: out/*.apk
+          generate_release_notes: true
+          body: |
+            ## inkScroll ${{ github.ref_name }}
+
+            本地漫画 / 文档阅读器。下载对应架构的 APK 直接安装：
+
+            | 架构 | 适用 |
+            |---|---|
+            | `arm64-v8a` | **绝大多数现代手机（推荐）** |
+            | `armeabi-v7a` | 较老的 32 位设备 |
+            | `x86_64` | 模拟器 |
+
+            安装后在系统设置里为 inkScroll 手动开启高刷新率，即可跑满 120Hz
+            （Android 与国产 ROM 的限制，应用无法绕过）。
+
+            详细改动见仓库根目录的 `README.md`。

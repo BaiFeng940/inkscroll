@@ -1,0 +1,19 @@
+include: package:flutter_lints/flutter.yaml
+
+analyzer:
+  errors:
+    # 骨架阶段：未使用的导入/字段先给提示，不要阻断构建
+    unused_import: warning
+    unused_field: warning
+    unused_element: warning
+  exclude:
+    - build/**
+    - android/**
+    - ios/**
+
+linter:
+  rules:
+    prefer_const_constructors: false
+    prefer_const_literals_to_create_immutables: false
+    avoid_print: true
+    use_build_context_synchronously: warning

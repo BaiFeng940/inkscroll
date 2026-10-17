@@ -1,0 +1,42 @@
+name: inkscroll
+description: "inkScroll — Flutter 漫画/文档阅读器：压缩包按需解压、虚拟长页、高刷新率适配。"
+publish_to: 'none'
+version: 0.1.0+1
+
+environment:
+  # 本机实测：Flutter 3.47.7 / Dart 3.13.5
+  sdk: '>=3.4.0 <4.0.0'
+  flutter: '>=3.22.0'
+
+dependencies:
+  flutter:
+    sdk: flutter
+
+  # ---- 起步最小集（本仓库实际使用）----
+  provider: ^6.1.2            # 状态管理：ChangeNotifier，零样板
+  file_picker: ^8.1.2         # SAF 文件/文件夹选择，Android 免存储权限
+  shared_preferences: ^2.3.2  # 书架元数据 + 阅读进度 + 设置
+  path_provider: ^2.1.4       # 应用私有目录
+  archive: ^3.6.1             # 只借用 DEFLATE 实现（Inflate）
+  crypto: ^3.0.3              # 导入指纹（去重）
+  path: ^1.9.0
+
+  # ---- 后续阶段按需解注（接入指引见对应 importer 文件顶部注释）----
+  # pdfx: ^2.6.0                # PDF 渲染（MIT）
+  # xml: ^6.5.0                 # DOCX 解析
+  # html: ^0.15.4               # 网页正文解析
+  # dio: ^5.7.0                 # 网络 + Range + CancelToken
+  # fast_gbk: ^1.0.0            # GBK/GB18030 纯 Dart 解码
+  # charset_converter: ^2.1.0   # 平台编码探测（Android CharsetDetector）
+  # extended_image: ^8.2.0      # 需要更强图片手势时
+  # drift: ^2.20.0              # 书多了之后换数据库
+  # flutter_secure_storage: ^9.2.2  # 记住压缩包密码 / 网盘 token
+  # webdav_client: ^1.2.1       # WebDAV 网盘（零合规风险）
+
+dev_dependencies:
+  flutter_test:
+    sdk: flutter
+  flutter_lints: ^4.0.0
+
+flutter:
+  uses-material-design: true

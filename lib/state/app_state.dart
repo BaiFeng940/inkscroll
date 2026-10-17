@@ -1,0 +1,525 @@
+/// 全局应用状态：书架、设置、导入、文档装载。
+///
+/// 用 Provider + ChangeNotifier（见 DESIGN.md §1.4 的选型理由）：
+///   - 阅读器状态天然是"长生命周期、频繁小幅变更的控制器"，ChangeNotifier 最贴合；
+///   - 书架与设置是全局单例，直接 provide；
+///   - 无代码生成、零额外概念 —— 这是"最容易实现"的路径。
+library;
+
+import 'dart:async';
+import 'dart:io';
+
+import 'package:flutter/foundation.dart';
+import 'package:path/path.dart' as p;
+
+import '../core/errors.dart';
+import '../data/archive/tar_archive_source.dart';
+import '../data/archive_extractor.dart';
+import '../data/archive/zip_archive_source.dart';
+import '../data/byte_source.dart';
+import '../data/byte_store.dart';
+import '../data/archive/archive_source.dart';
+import '../data/importer.dart';
+import '../data/models/book_meta.dart';
+import '../data/models/reader_settings.dart';
+import '../data/prefs_store.dart';
+import '../importers/import_router.dart';
+import '../reader/document.dart';
+import '../reader/document_codec.dart';
+import '../reader/page_cache.dart';
+
+class AppState extends ChangeNotifier {
+  AppState(this._prefs);
+
+  final PrefsStore _prefs;
+
+  ByteStore? _store;
+  ImportRouter? _router;
+
+  /// 后台解压管理器：把压缩包解压到 app 缓存，让翻页变成直接读文件
+  ExtractionManager? _extraction;
+
+  ByteStore get store => _store!;
+  ImportRouter get router => _router!;
+  ExtractionManager get extraction => _extraction!;
+
+  /// 阅读器需要直接读写进度，所以要把 PrefsStore 交给它
+  PrefsStore get prefsForReader => _prefs;
+
+  List<BookMeta> books = [];
+  ReaderSettings settings = const ReaderSettings();
+  bool ready = false;
+
+  /// 当前导入进度（null 表示没有进行中的导入）
+  ImportProgressState? importProgress;
+
+  Future<void> bootstrap() async {
+    _store = await ByteStore.open();
+    _router = ImportRouter(store: _store!);
+    _extraction = ExtractionManager(store: _store!);
+    books = _prefs.loadBooks();
+    settings = _prefs.loadSettings();
+    ready = true;
+    notifyListeners();
+  }
+
+  // ------------------------------------------------------------------
+  // 书架
+  // ------------------------------------------------------------------
+  List<BookMeta> get recentBooks {
+    final list = [...books]..sort((a, b) {
+        final at = a.lastReadAt ?? a.importedAt;
+        final bt = b.lastReadAt ?? b.importedAt;
+        return bt.compareTo(at);
+      });
+    return list;
+  }
+
+  List<BookMeta> get favorites => books.where((b) => b.isFavorite).toList();
+
+  List<BookMeta> search(String query) {
+    final q = query.trim().toLowerCase();
+    if (q.isEmpty) return recentBooks;
+    // 书名搜索。数据量到几千本时换成 drift + FTS5。
+    return recentBooks.where((b) => b.title.toLowerCase().contains(q)).toList();
+  }
+
+  Future<void> toggleFavorite(String bookId) async {
+    await _prefs.toggleFavorite(bookId);
+    books = _prefs.loadBooks();
+    notifyListeners();
+  }
+
+  Future<void> rename(String bookId, String newTitle) async {
+    await _prefs.renameBook(bookId, newTitle);
+    books = _prefs.loadBooks();
+    notifyListeners();
+  }
+
+  Future<void> deleteBook(String bookId) async {
+    await _prefs.deleteBook(bookId);
+    await _store?.deleteBook(bookId);
+    books = _prefs.loadBooks();
+    notifyListeners();
+  }
+
+  Future<void> refreshBooks() async {
+    books = _prefs.loadBooks();
+    notifyListeners();
+  }
+
+  // ------------------------------------------------------------------
+  // 设置
+  // ------------------------------------------------------------------
+  Future<void> updateSettings(ReaderSettings next) async {
+    settings = next;
+    notifyListeners();
+    await _prefs.saveSettings(next);
+  }
+
+  Future<void> rememberModeForBook(String bookId, ReadingMode mode) async {
+    if (settings.lastModePerBook[bookId] == mode) return;
+    final map = Map<String, ReadingMode>.from(settings.lastModePerBook);
+    map[bookId] = mode;
+    await updateSettings(settings.copyWith(lastModePerBook: map));
+  }
+
+  // ------------------------------------------------------------------
+  // 导入
+  // ------------------------------------------------------------------
+
+  /// 导入并落盘。成功返回 BookMeta；失败抛 [AppError]；
+  /// 需要密码抛 [PasswordPromptNeeded]（由 UI 弹框后调 [importWithPassword]）。
+  Future<BookMeta> importFrom(SourcePick pick) async {
+    try {
+      return await _runImport(pick, password: null);
+    } finally {
+      _setProgress(null, '');
+    }
+  }
+
+  /// 带密码重试
+  Future<BookMeta> importWithPassword(SourcePick pick, String password) async {
+    try {
+      return await _runImport(pick, password: password);
+    } finally {
+      _setProgress(null, '');
+    }
+  }
+
+  Future<BookMeta> _runImport(SourcePick pick, {required String? password}) async {
+    final routed = await router.route(pick);
+    if (routed.earlyFailure != null) throw routed.earlyFailure!;
+
+    final importer = routed.importer;
+    if (importer == null) throw const ImportEmptyError();
+
+    _setProgress(0, '准备导入…');
+
+    final ctx = ImportContext(
+      pick: pick,
+      password: password,
+      passwordAttempt: password == null ? 1 : 2,
+      onProgress: _setProgress,
+    );
+
+    ImportOutcome outcome;
+    try {
+      outcome = await importer.run(ctx);
+    } on AppError {
+      rethrow;
+    } catch (e, st) {
+      throw GenericError('导入失败：$e', technicalDetail: st.toString());
+    }
+
+    switch (outcome) {
+      case ImportedDocument(:final document):
+        return await _persist(pick, document);
+
+      case NeedPassword(:final attempt):
+        throw PasswordPromptNeeded(attempt: attempt);
+
+      case ImportFailure(:final error):
+        throw error;
+    }
+  }
+
+  Future<BookMeta> _persist(SourcePick pick, Document doc) async {
+    final bookId = pick.sourceId;
+
+    // ★ 把算好的 Document 落盘：下次打开就是一次 JSON 解析（秒开），
+    //   而不是重新读中央目录 + 重新嗅探几千张图的尺寸。
+    await DocumentCodec.save(store.bookDir(bookId), doc);
+
+    final meta = BookMeta(
+      id: bookId,
+      title: pick.displayName,
+      kind: switch (doc.kind) {
+        DocumentKind.comic => BookKind.comic,
+        DocumentKind.novel => BookKind.novel,
+        DocumentKind.pdf => BookKind.pdf,
+        DocumentKind.web => BookKind.web,
+        DocumentKind.doc => BookKind.doc,
+      },
+      source: _sourceFor(pick),
+      pageCount: doc.pageCount,
+      chapterCount: doc.chapterCount,
+      importedAt: DateTime.now(),
+      description: doc.warnings.isEmpty ? null : doc.warnings.join('\n'),
+    );
+
+    await _prefs.upsertBook(meta);
+    books = _prefs.loadBooks();
+    notifyListeners();
+    return meta;
+  }
+
+  BookSource _sourceFor(SourcePick pick) {
+    switch (pick.kind) {
+      case SourcePickKind.folder:
+        return FolderSource(store.folderPathFor(pick.sourceId));
+      case SourcePickKind.files:
+        // 散图的实际路径不放在这里：导入时已经复制进私有目录，
+        // 打开时直接扫 store.folderPathFor(bookId)。见 _rebuildFileDocument。
+        return const LooseFilesSource([]);
+      case SourcePickKind.file:
+      case SourcePickKind.url:
+        return ArchiveSourceSpec(
+          path: store.archivePathFor(
+              pick.sourceId, p.basename(pick.path ?? 'book.zip')),
+        );
+    }
+  }
+
+  // ------------------------------------------------------------------
+  // 文档装载：从 document.json 读，读不到就重新解析
+  // ------------------------------------------------------------------
+  Future<({Document document, PageByteResolver resolver})> buildDocument(
+    BookMeta book,
+  ) async {
+    final dir = store.bookDir(book.id);
+
+    // ① 快路径：直接读 JSON
+    final cached = await DocumentCodec.load(dir);
+
+    // ② 无论走哪条路，都需要一个 resolver 指向真实字节
+    switch (book.source) {
+      case FolderSource():
+      case LooseFilesSource():
+        final doc = cached ?? await _rebuildFileDocument(book);
+        return (document: doc, resolver: FilePageByteResolver());
+
+      case ArchiveSourceSpec(:final path):
+        final src = await FileByteSource.open(path);
+        final ArchiveSource source = await _openArchive(src, path);
+        final doc = cached ?? await _rebuildArchiveDocument(book, source, path);
+
+        // 解压已经在 prepareBook() 里提前完成（见那里的注释）。
+        // resolver 仍会**优先读解压产物、缺失则回退到 zip**，
+        // 所以即使解压没做完或被跳过，阅读也不会出错。
+        return (
+          document: doc,
+          resolver: ArchivePageByteResolver(
+            source: source,
+            extractedDir: store.extractedDirFor(book.id),
+          ),
+        );
+    }
+  }
+
+  Future<ArchiveSource> _openArchive(RandomAccessByteSource src, String path) async {
+    if (path.toLowerCase().endsWith('.tar')) {
+      final t = TarArchiveSource(src);
+      await t.open();
+      return t;
+    }
+    final z = ZipArchiveSource(src);
+    await z.open();
+    return z;
+  }
+
+  // ------------------------------------------------------------------
+  // 阅读前准备：把压缩包解压到 app 缓存
+  // ------------------------------------------------------------------
+  //
+  // 为什么把解压**提前到打开之前**，而不是像之前那样"边读边后台解压"：
+  //
+  //   DEFLATE 解压是 CPU 密集操作，在 Dart 里跑在**主 isolate** 上。
+  //   边读边解压意味着每次翻页都要在主线程解压几十~几百 KB，
+  //   用户看到的就是"翻页很慢、会卡"。
+  //
+  //   先把解压做完，之后每页都是**直接文件 I/O**（几毫秒），
+  //   而且文件内容能吃到操作系统的页缓存。
+  //
+  //   代价是首次打开要等一次解压 → 所以配一个**带进度的等待界面**，
+  //   而且解压结果落盘持久化，只有第一次打开需要等。
+  bool needsPrepare(BookMeta book) {
+    if (book.source is! ArchiveSourceSpec) return false; // 文件夹/散图无需解压
+    final marker = File(p.join(store.extractedDirFor(book.id), '.complete'));
+    return !marker.existsSync();
+  }
+
+  /// 执行解压。返回 null 表示成功（或已回退为按需读取）；
+  /// 返回字符串表示给用户看的提示（失败原因 / 跳过原因）。
+  Future<String?> prepareBook(
+    BookMeta book, {
+    required void Function(ExtractProgress progress) onProgress,
+  }) async {
+    if (book.source is! ArchiveSourceSpec) return null;
+    final spec = book.source as ArchiveSourceSpec;
+
+    final src = await FileByteSource.open(spec.path);
+    ArchiveSource source;
+    try {
+      source = await _openArchive(src, spec.path);
+    } catch (e) {
+      await src.close();
+      return '打开压缩包失败：$e';
+    }
+
+    try {
+      if (!_extraction!.extractor.shouldExtract(source)) {
+        final total = source.totalUncompressedBytes;
+        return total > 0
+            ? '解压后约 ${ByteStore.humanSize(total)}，超过缓存上限，'
+                '已改为按需读取（首次翻页稍慢，之后流畅）'
+            : '该压缩包无需解压';
+      }
+
+      // 走 ExtractionManager 而不是直接调 extractor：
+      // 这样进度会同时推给设置面板里的解压卡片，两边状态一致。
+      final result = await _extraction!.extractWithProgress(
+        bookId: book.id,
+        source: source,
+        onProgress: onProgress,
+      );
+      if (result.ok) return null;
+      return result.skippedReason ?? '已部分解压（不影响阅读）';
+    } catch (e) {
+      return '解压失败：$e（已回退为按需读取，不影响阅读）';
+    } finally {
+      // 这个 source 只为解压而开，用完即关。
+      // 阅读时会由 buildDocument 重新打开一个。
+      await source.close();
+    }
+  }
+
+  /// 慢路径（缓存缺失/版本不符时）：重新构建 Document。
+  ///
+  /// 内容已经在私有目录里了，所以走的是"从本地目录重建"，
+  /// 不做任何复制，也不访问原始来源。
+  Future<Document> _rebuildFileDocument(BookMeta book) async {
+    final root = switch (book.source) {
+      FolderSource(:final path) => path,
+      LooseFilesSource() => store.folderPathFor(book.id),
+      _ => throw const GenericError('来源类型不匹配'),
+    };
+
+    final dir = Directory(root);
+    if (!await dir.exists()) {
+      throw GenericError(
+        '内容目录不存在：$root。请重新导入这本书。',
+        action: ErrorAction.chooseAnother,
+      );
+    }
+
+    final files = <File>[];
+    await for (final e in dir.list(recursive: true, followLinks: false)) {
+      if (e is File && _isImagePath(e.path)) files.add(e);
+    }
+    files.sort((a, b) => _natural(a.path, b.path));
+
+    final pages = <String, PageNode>{};
+    final pageIds = <String>[];
+    for (final f in files) {
+      final id = 'f:${p.relative(f.path, from: root)}';
+      pages[id] = PageNode(
+        id: id,
+        kind: PageKind.image,
+        content: ImageContent(ref: LooseFileRef(f.path)),
+      );
+      pageIds.add(id);
+    }
+    if (pageIds.isEmpty) throw const ImportEmptyError();
+
+    final doc = Document(
+      id: 'doc_${book.id}',
+      bookId: book.id,
+      title: book.title,
+      kind: DocumentKind.comic,
+      chapters: [Chapter(index: 0, title: '正文', pageIds: pageIds)],
+      pages: pages,
+      hint: DocumentLayoutHint.webtoonPreferred,
+      warnings: const ['页面尺寸未预分析，滚动时自动测量。'],
+    );
+    await DocumentCodec.save(store.bookDir(book.id), doc);
+    return doc;
+  }
+
+  Future<Document> _rebuildArchiveDocument(
+    BookMeta book,
+    ArchiveSource source,
+    String archivePath,
+  ) async {
+    final images =
+        source.entries.where((e) => !e.isDirectory && _isImagePath(e.entryPath)).toList()
+          ..sort((a, b) => _natural(a.entryPath, b.entryPath));
+
+    if (images.isEmpty) throw const ImportEmptyError();
+
+    final groups = <String, List<ArchiveEntryInfo>>{};
+    for (final e in images) {
+      groups.putIfAbsent(e.parentDir, () => []).add(e);
+    }
+
+    final pages = <String, PageNode>{};
+    final chapters = <Chapter>[];
+    int ci = 0;
+    for (final dirKey in groups.keys.toList()..sort(_natural)) {
+      final list = groups[dirKey]!..sort((a, b) => _natural(a.entryPath, b.entryPath));
+      final pageIds = <String>[];
+      for (final e in list) {
+        final id = 'p:${e.entryPath}';
+        pages[id] = PageNode(
+          id: id,
+          kind: PageKind.image,
+          content: ImageContent(
+            ref: ArchiveEntryRef(
+              archivePath: archivePath,
+              entryPath: e.entryPath,
+              uncompressedSize: e.uncompressedSize,
+            ),
+          ),
+        );
+        pageIds.add(id);
+      }
+      chapters.add(Chapter(
+        index: ci,
+        title: dirKey.isEmpty ? '正文' : p.basename(dirKey),
+        pageIds: pageIds,
+      ));
+      ci++;
+    }
+
+    final doc = Document(
+      id: 'doc_${book.id}',
+      bookId: book.id,
+      title: book.title,
+      kind: DocumentKind.comic,
+      chapters: chapters,
+      pages: pages,
+      hint: DocumentLayoutHint.webtoonPreferred,
+      warnings: const ['页面尺寸未预分析，滚动时自动测量。'],
+    );
+    await DocumentCodec.save(store.bookDir(book.id), doc);
+    return doc;
+  }
+
+  static bool _isImagePath(String path) {
+    final ext = p.extension(path).toLowerCase();
+    return const {
+      '.jpg', '.jpeg', '.png', '.webp', '.gif', '.bmp', '.avif', '.heic', '.jfif'
+    }.contains(ext);
+  }
+
+  static int _natural(String a, String b) {
+    // 逐段自然排序：'第1话/10.jpg' 与 '第10话/1.jpg' 不会错位
+    final pa = a.replaceAll('\\', '/').split('/');
+    final pb = b.replaceAll('\\', '/').split('/');
+    for (int i = 0; i < pa.length && i < pb.length; i++) {
+      final c = _cmpNatural(pa[i], pb[i]);
+      if (c != 0) return c;
+    }
+    return pa.length - pb.length;
+  }
+
+  static int _cmpNatural(String a, String b) {
+    int i = 0, j = 0;
+    while (i < a.length && j < b.length) {
+      final ca = a.codeUnitAt(i), cb = b.codeUnitAt(j);
+      final da = ca >= 0x30 && ca <= 0x39;
+      final db = cb >= 0x30 && cb <= 0x39;
+      if (da && db) {
+        int si = i, sj = j;
+        while (i < a.length && a.codeUnitAt(i) >= 0x30 && a.codeUnitAt(i) <= 0x39) {
+          i++;
+        }
+        while (j < b.length && b.codeUnitAt(j) >= 0x30 && b.codeUnitAt(j) <= 0x39) {
+          j++;
+        }
+        final na = a.substring(si, i).replaceFirst(RegExp(r'^0+(?=\d)'), '');
+        final nb = b.substring(sj, j).replaceFirst(RegExp(r'^0+(?=\d)'), '');
+        if (na.length != nb.length) return na.length - nb.length;
+        final c = na.compareTo(nb);
+        if (c != 0) return c;
+      } else {
+        final c = ca.compareTo(cb);
+        if (c != 0) return c;
+        i++;
+        j++;
+      }
+    }
+    return (a.length - i) - (b.length - j);
+  }
+
+  void _setProgress(double? ratio, String label) {
+    if (ratio == null) {
+      importProgress = null;
+    } else {
+      importProgress = ImportProgressState(ratio, label);
+    }
+    notifyListeners();
+  }
+}
+
+class ImportProgressState {
+  const ImportProgressState(this.ratio, this.label);
+  final double ratio;
+  final String label;
+}
+
+/// 需要 UI 输入密码（不是错误，是一个正常的分支）
+class PasswordPromptNeeded implements Exception {
+  const PasswordPromptNeeded({required this.attempt});
+  final int attempt;
+}
