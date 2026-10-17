@@ -13,8 +13,8 @@
 </p>
 
 <p align="center">
-  <a href="https://github.com/inkscroll/inkscroll/releases/latest">⬇ 下载 APK</a> ·
-  <a href="https://inkscroll.github.io/inkscroll/">项目主页</a> ·
+  <a href="https://github.com/BaiFeng940/inkscroll/releases/latest">⬇ 下载 APK</a> ·
+  <a href="https://baifeng940.github.io/inkscroll/">项目主页</a> ·
   <a href="DESIGN.md">设计文档</a>
 </p>
 
