@@ -58,19 +58,8 @@ jobs:
         uses: softprops/action-gh-release@v2
         with:
           files: out/*.apk
+          # ★ 只用自动生成的 release notes，**不要再写 body**。
+          #   写了的话每次打 tag 都会把人工写好的详细发布说明覆盖掉
+          #   （0.2.0 就踩到了：1310 字符的说明被覆盖成 343 字符）。
+          #   需要详细说明时，打完 tag 后用 PATCH /releases/{id} 补。
           generate_release_notes: true
-          body: |
-            ## inkScroll ${{ github.ref_name }}
-
-            本地漫画 / 文档阅读器。下载对应架构的 APK 直接安装：
-
-            | 架构 | 适用 |
-            |---|---|
-            | `arm64-v8a` | **绝大多数现代手机（推荐）** |
-            | `armeabi-v7a` | 较老的 32 位设备 |
-            | `x86_64` | 模拟器 |
-
-            安装后在系统设置里为 inkScroll 手动开启高刷新率，即可跑满 120Hz
-            （Android 与国产 ROM 的限制，应用无法绕过）。
-
-            详细改动见仓库根目录的 `README.md`。
