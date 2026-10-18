@@ -67,9 +67,48 @@ http.Client fakeClientReturning(String xml, {int status = 207}) {
 
 void main() {
   group('WebDavClient · 地址归一化', () {
-    test('缺协议时补 http://', () {
-      final c = WebDavClient(baseUrl: '192.168.1.10:5005/dav');
+    test('缺协议时默认补 https://（NAS 普遍开 HTTPS）', () {
+      // 以前的默认是 http://，碰到只开 HTTPS 的 NAS（飞牛 5006）
+      // 会被服务器直接掐断，用户看到"连接不上服务器"——完全误导。
+      final c = WebDavClient(baseUrl: '192.168.1.10:5006');
+      expect(c.baseUrl, 'https://192.168.1.10:5006');
+    });
+
+    test('显式 http:// 保持不变（不会被强行改成 https）', () {
+      final c = WebDavClient(baseUrl: 'http://192.168.1.10:5005/dav');
       expect(c.baseUrl, 'http://192.168.1.10:5005/dav');
+    });
+
+    test('resolveBaseUrl 对只开 HTTPS 的服务器会探测到 https', () async {
+      // 模拟：https 能拿到 401（服务器有响应），http 直接断开
+      final probe = await WebDavClient.resolveBaseUrl(
+        input: 'nas.local:5006',
+        httpClient: MockClient((req) async {
+          if (req.url.scheme == 'https') {
+            return http.Response('denied', 401);
+          }
+          throw http.ClientException('Connection closed before full header');
+        }),
+      );
+      expect(probe.baseUrl, 'https://nas.local:5006');
+      expect(probe.switched, isFalse); // https 就是首选，不算"切换"
+    });
+
+    test('https 不通时会退到 http', () async {
+      final probe = await WebDavClient.resolveBaseUrl(
+        input: 'https://nas.local:5005/dav',
+        httpClient: MockClient((req) async {
+          if (req.url.scheme == 'http') {
+            return http.Response(
+              '<?xml version="1.0"?><multistatus xmlns="DAV:"/>',
+              207,
+            );
+          }
+          throw http.ClientException('Connection closed');
+        }),
+      );
+      expect(probe.baseUrl, 'http://nas.local:5005/dav');
+      expect(probe.switched, isTrue);
     });
 
     test('去掉末尾斜杠', () {

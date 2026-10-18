@@ -69,8 +69,7 @@ class WebDavEntry {
       'WebDavEntry($name, dir=$isDirectory, size=$size)';
 }
 
-class WebDavClient {
-  WebDavClient({
+class WebDavClient {  WebDavClient({
     required String baseUrl,
     this.username,
     this.password,
@@ -102,14 +101,116 @@ class WebDavClient {
   static String _normalizeBase(String raw) {
     var s = raw.trim();
     if (s.isEmpty) return s;
-    // 用户可能只填了 IP 或漏了协议
+    // 用户可能只填了 IP 或漏了协议。
+    // ★ 这里默认 **https** 而不是 http：
+    //   现在的 NAS 大多开了 HTTPS（飞牛 OS 的 5006/5667 就是纯 HTTPS 端口），
+    //   默认 http 会直接撞上 "Client sent an HTTP request to an HTTPS server"，
+    //   用户看到的是"连接不上服务器"，完全误导。
+    //   真正稳妥的是 [resolveBaseUrl] 的自动探测；这里只是兜底默认值。
     if (!s.startsWith('http://') && !s.startsWith('https://')) {
-      s = 'http://$s';
+      s = 'https://$s';
     }
     while (s.endsWith('/')) {
       s = s.substring(0, s.length - 1);
     }
     return s;
+  }
+
+  /// **自动识别 http / https** —— 用户只填 `192.168.1.10:5006` 时也能连上。
+  ///
+  /// 判定标准是"服务器有没有回应"，而不是"调用成不成功"：
+  ///   · 拿到任何 HTTP 响应（207 / 401 / 403 / 404…）→ 说明**协议对了**，
+  ///     就用这个 scheme。之后真正的错误（比如 401 密码错）会由业务调用抛出来。
+  ///   · 连接被拒 / 被重置 / TLS 失败 → 才换下一个 scheme。
+  ///
+  /// 这样"密码错"不会被误报成"连接不上"——这正是之前踩的坑。
+  static Future<WebDavBaseProbe> resolveBaseUrl({
+    required String input,
+    String? username,
+    String? password,
+    bool allowSelfSigned = false,
+    Duration timeout = const Duration(seconds: 8),
+    http.Client? httpClient,
+  }) async {
+    final raw = input.trim();
+    if (raw.isEmpty) {
+      throw const NetworkUnreachableError(detail: '地址为空');
+    }
+
+    final hasHttp = raw.startsWith('http://');
+    final hasHttps = raw.startsWith('https://');
+    final hostPart = (hasHttp || hasHttps)
+        ? raw.replaceFirst(RegExp(r'^https?://'), '')
+        : raw;
+
+    // 候选顺序：
+    //   没写协议 → 先 https 后 http（NAS 普遍开 HTTPS）
+    //   写了协议 → 先用它，失败再试另一种（用户记错协议也能救回来）
+    final candidates = <String>[];
+    if (hasHttp) {
+      candidates.addAll(['http', 'https']);
+    } else if (hasHttps) {
+      candidates.addAll(['https', 'http']);
+    } else {
+      candidates.addAll(['https', 'http']);
+    }
+
+    final attempts = <String>[];
+    Object? lastError;
+
+    for (final scheme in candidates) {
+      final base = _normalizeBase('$scheme://$hostPart');
+      if (candidates.length > 1 && attempts.any((a) => a.startsWith('$base →'))) {
+        continue;
+      }
+      final client = WebDavClient(
+        baseUrl: base,
+        username: username,
+        password: password,
+        allowSelfSigned: allowSelfSigned,
+        timeout: timeout,
+        httpClient: httpClient,
+      );
+      try {
+        await client.list(base);
+        client.close();
+        attempts.add('$base → 成功');
+        return WebDavBaseProbe(baseUrl: base, attempts: attempts, switched: hasHttp || hasHttps ? scheme != candidates.first : true);
+      } on NetworkAuthError {
+        // 服务器有回应且明确拒绝 → 协议是对的，问题在账号
+        client.close();
+        attempts.add('$base → 服务器有响应（认证被拒）');
+        return WebDavBaseProbe(baseUrl: base, attempts: attempts, switched: scheme != candidates.first);
+      } on NetworkHttpError catch (e) {
+        // 同样是"服务器有回应"
+        client.close();
+        attempts.add('$base → 服务器有响应（HTTP ${e.statusCode}）');
+        return WebDavBaseProbe(baseUrl: base, attempts: attempts, switched: scheme != candidates.first);
+      } on AppError catch (e) {
+        // 连不上 / 证书问题 → 换下一个协议
+        client.close();
+        attempts.add('$base → ${e.runtimeType}');
+        lastError = e;
+      } catch (e) {
+        client.close();
+        attempts.add('$base → $e');
+        lastError = e;
+      }
+    }
+
+    // 全都失败：把尝试过的地址都告诉用户，否则只报一个地址会让人以为是地址写错
+    if (lastError is AppError) {
+      final a = lastError;
+      throw GenericError(
+        a.message,
+        technicalDetail:
+            '${a.technicalDetail ?? ''}\n尝试记录: ${attempts.join(' | ')}',
+      );
+    }
+    throw NetworkUnreachableError(
+      address: input,
+      detail: '尝试记录: ${attempts.join(' | ')}',
+    );
   }
 
   /// `scheme://host:port`
@@ -429,6 +530,27 @@ class WebDavClient {
   Future<List<WebDavEntry>> testConnection() => list(baseUrl);
 }
 
+
+/// [WebDavClient.resolveBaseUrl] 的结果
+class WebDavBaseProbe {
+  const WebDavBaseProbe({
+    required this.baseUrl,
+    required this.attempts,
+    required this.switched,
+  });
+
+  /// 探测出的可用根地址（含协议）
+  final String baseUrl;
+
+  /// 每次尝试的记录（给用户看排查信息）
+  final List<String> attempts;
+
+  /// 是否与用户输入/默认不同（说明自动纠正过协议）
+  final bool switched;
+
+  @override
+  String toString() => 'WebDavBaseProbe($baseUrl, switched=$switched)';
+}
 /// 本地实现，避免为了一个方法引入 `package:collection`。
 extension _FirstWhereOrNull<E> on Iterable<E> {
   E? firstWhereOrNull(bool Function(E element) test) {

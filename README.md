@@ -232,7 +232,10 @@ DEFLATE 是流式算法，想要前 100KB 的输出，无法只读压缩数据�
 一旦盒子比例 == 图片比例，三种 fit 完全等价 ——
 不拉伸、不裁剪、不留白**同时成立**。
 
-实现：新增 `lib/ui/widgets/adaptive_media_box.dart`。
+> 这一轮的尝试（`adaptive_media_box.dart`）后来被更简单的方案取代了：
+> **只给宽度、高度交给解码器**（见 `lib/ui/reader/widgets/page_image.dart`），
+> 连"比例"都不需要提前知道，那个文件已经删除。
+
 `PageImage` 解码后拿到真实宽高，作为布局的唯一真相：
 
 ```

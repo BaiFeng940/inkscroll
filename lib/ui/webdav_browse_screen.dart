@@ -314,21 +314,38 @@ class _WebDavBrowseScreenState extends State<WebDavBrowseScreen> {
       _connecting = true;
       _error = null;
     });
-    final client = draft.createClient();
     try {
-      // ★ 先验证再保存 —— 否则用户会存下一堆连不上的连接
-      await client.list(draft.baseUrl);
-      final conn = draft.copyWith(lastUsedAt: DateTime.now());
+      // ★ 先自动识别 http/https，再验证。
+      //
+      //   之前直接拿用户输入的地址去请求，而 `_normalizeBase` 默认补 http://，
+      //   碰到只开 HTTPS 的 NAS（比如飞牛 5006）会被服务器直接掐断，
+      //   用户看到的是"连接不上服务器"——**完全误导**，实际是协议选错了。
+      final probe = await WebDavClient.resolveBaseUrl(
+        input: draft.baseUrl,
+        username: draft.username.isEmpty ? null : draft.username,
+        password: draft.password.isEmpty ? null : draft.password,
+        allowSelfSigned: draft.allowSelfSigned,
+      );
+
+      final resolved = draft.copyWith(baseUrl: probe.baseUrl);
+      final conn = resolved.copyWith(lastUsedAt: DateTime.now());
       await widget.store.upsert(conn);
-      client.close();
       if (!mounted) return;
       setState(() {
         _connections = widget.store.all();
         _connecting = false;
       });
+      if (probe.switched) {
+        ScaffoldMessenger.of(context)
+          ..hideCurrentSnackBar()
+          ..showSnackBar(SnackBar(
+            content: Text('已自动识别为 ${Uri.parse(probe.baseUrl).scheme}://'),
+            duration: const Duration(seconds: 3),
+            behavior: SnackBarBehavior.floating,
+          ));
+      }
       await _openConnection(conn);
     } on AppError catch (e) {
-      client.close();
       if (!mounted) return;
       setState(() {
         _error = e;
@@ -336,7 +353,6 @@ class _WebDavBrowseScreenState extends State<WebDavBrowseScreen> {
       });
       _showError(e);
     } catch (e) {
-      client.close();
       if (!mounted) return;
       setState(() => _connecting = false);
       _showError(GenericError('连接失败：$e'));
@@ -345,11 +361,24 @@ class _WebDavBrowseScreenState extends State<WebDavBrowseScreen> {
 
   void _showError(AppError e) {
     if (!mounted) return;
+    // 把技术细节也显示出来（比如 "HTTP 401" / "Connection closed"）——
+    // 只给一句"连接不上"用户无从下手。
+    final detail = e.technicalDetail;
+    final text = (detail == null || detail.trim().isEmpty)
+        ? e.message
+        : '${e.message}\n\n技术细节：$detail';
     ScaffoldMessenger.of(context)
       ..hideCurrentSnackBar()
       ..showSnackBar(SnackBar(
-        content: Text(e.message),
-        duration: const Duration(seconds: 6),
+        content: Text(text),
+        duration: const Duration(seconds: 14),
+        behavior: SnackBarBehavior.floating,
+        action: SnackBarAction(
+          label: '知道了',
+          textColor: Colors.white,
+          onPressed: () =>
+              ScaffoldMessenger.of(context).hideCurrentSnackBar(),
+        ),
       ));
   }
 
@@ -633,11 +662,12 @@ class _ConnectionFormState extends State<_ConnectionForm> {
           autocorrect: false,
           decoration: const InputDecoration(
             labelText: '服务器地址',
-            hintText: 'http://192.168.1.10:5005/dav',
+            hintText: '192.168.1.10:5006',
             border: OutlineInputBorder(),
             prefixIcon: Icon(Icons.link),
-            helperText: '飞牛 OS：设置 → 文件服务 → WebDAV，默认端口 5005，路径 /dav',
-            helperMaxLines: 2,
+            helperText: '飞牛 OS：设置 → 文件服务 → WebDAV（默认端口 5005 / 5006）'
+                '\n只填 IP:端口 也可以，http/https 会自动识别',
+            helperMaxLines: 3,
           ),
         ),
         const SizedBox(height: 12),
