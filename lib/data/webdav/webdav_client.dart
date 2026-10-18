@@ -140,14 +140,62 @@ class WebDavClient {
   void close() => _client.close();
 
   /// 把 PROPFIND 返回的 href 变成可直接请求的绝对 URL
+  ///
+  /// ★ 这里必须做**编码归一化**。
+  ///
+  /// 规范要求 href 是百分号编码的，但现实里不少实现（包括一些 NAS 自带的
+  /// 简易 WebDAV）会直接返回**未编码**的路径，例如
+  /// `/dav/第01话 火影/`。直接拼成 URL 再 `Uri.parse` 会抛 FormatException，
+  /// 表现为"子目录里的文件全读不到"而且**没有任何错误提示**（调用方通常
+  /// 用 try/catch 兜着）——这个坑实测踩到过。
+  ///
+  /// 做法：先解码再编码，对"已编码"和"未编码"两种输入都幂等。
   String resolveHref(String href, Uri requestUri) {
     final trimmed = href.trim();
     if (trimmed.isEmpty) return requestUri.toString();
+
     final parsed = Uri.tryParse(trimmed);
-    if (parsed != null && parsed.hasScheme) return parsed.toString();
-    if (trimmed.startsWith('/')) return '$origin$trimmed';
+    if (parsed != null && parsed.hasScheme) {
+      return _normalizeUrlEncoding(trimmed);
+    }
+    if (trimmed.startsWith('/')) {
+      return _normalizeUrlEncoding('$origin$trimmed');
+    }
     // 少数服务器返回相对路径：相对当前位置解析
-    return requestUri.resolve(trimmed).toString();
+    return _normalizeUrlEncoding(requestUri.resolve(trimmed).toString());
+  }
+
+  /// 把 URL 的路径部分做"解码 → 重新编码"，其余部分原样保留。
+  ///
+  /// 对已经正确编码的 URL 是无操作；对含中文/空格等字符的 URL 会修好它。
+  static String _normalizeUrlEncoding(String url) {
+    final m = RegExp(r'^([a-zA-Z][a-zA-Z0-9+.\-]*://[^/]*)(/.*)?$').firstMatch(url);
+    if (m == null) return url;
+    final prefix = m.group(1) ?? '';
+    final pathAndQuery = m.group(2) ?? '';
+
+    // 查询串单独处理（不参与路径分段）
+    String path = pathAndQuery;
+    String query = '';
+    final q = pathAndQuery.indexOf('?');
+    if (q >= 0) {
+      path = pathAndQuery.substring(0, q);
+      query = pathAndQuery.substring(q);
+    }
+
+    final normalized = path.split('/').map((segment) {
+      if (segment.isEmpty) return segment;
+      try {
+        // 已编码 → 解码回原文；未编码 → 原样返回
+        final decoded = Uri.decodeComponent(segment);
+        return Uri.encodeComponent(decoded);
+      } catch (_) {
+        // 解码失败（残缺的 %）就整体编码一次兜底
+        return Uri.encodeComponent(segment);
+      }
+    }).join('/');
+
+    return '$prefix$normalized$query';
   }
 
   /// 把编码的 URL 解成给人看的名字

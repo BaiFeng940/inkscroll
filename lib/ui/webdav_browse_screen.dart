@@ -39,18 +39,35 @@ class WebDavFolderSelection {
 Future<WebDavFolderSelection?> showWebDavBrowser({
   required BuildContext context,
   required WebDavConnectionStore store,
+  WebDavConnection? presetConnection,
+  bool libraryMode = false,
 }) {
   return Navigator.of(context).push<WebDavFolderSelection>(
     MaterialPageRoute(
-      builder: (_) => WebDavBrowseScreen(store: store),
+      builder: (_) => WebDavBrowseScreen(
+        store: store,
+        presetConnection: presetConnection,
+        libraryMode: libraryMode,
+      ),
     ),
   );
 }
 
 class WebDavBrowseScreen extends StatefulWidget {
-  const WebDavBrowseScreen({super.key, required this.store});
+  const WebDavBrowseScreen({
+    super.key,
+    required this.store,
+    this.presetConnection,
+    this.libraryMode = false,
+  });
 
   final WebDavConnectionStore store;
+
+  /// 从设置页点某条连接进来时，直接进它
+  final WebDavConnection? presetConnection;
+
+  /// 库模式：选中的目录会被展开成"多个含图片的子文件夹"批量导入
+  final bool libraryMode;
 
   @override
   State<WebDavBrowseScreen> createState() => _WebDavBrowseScreenState();
@@ -73,12 +90,15 @@ class _WebDavBrowseScreenState extends State<WebDavBrowseScreen> {
   void initState() {
     super.initState();
     _connections = widget.store.all();
-    if (_connections.length == 1) {
-      // 只有一条连接时直接进去，少一次点击
-      WidgetsBinding.instance.addPostFrameCallback((_) {
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (!mounted) return;
+      if (widget.presetConnection != null) {
+        _openConnection(widget.presetConnection!);
+      } else if (_connections.length == 1) {
+        // 只有一条连接时直接进去，少一次点击
         _openConnection(_connections.first);
-      });
-    }
+      }
+    });
   }
 
   @override
@@ -157,8 +177,13 @@ class _WebDavBrowseScreenState extends State<WebDavBrowseScreen> {
       .where((e) => !e.isDirectory && _isImageName(e.name))
       .toList();
 
-  /// 当前目录是否"自己就是一本漫画"（有图片，或者子目录里有图片）
-  bool get _currentHasImages => _images.isNotEmpty;
+  /// 库模式：只要当前目录有图片**或有子文件夹**就允许导入
+  bool get _canImport {
+    if (widget.libraryMode) {
+      return _images.isNotEmpty || _entries.any((e) => e.isDirectory);
+    }
+    return _images.isNotEmpty;
+  }
 
   void _startAddConnection() {
     setState(() {
@@ -214,7 +239,7 @@ class _WebDavBrowseScreenState extends State<WebDavBrowseScreen> {
           ],
         ),
         body: _active == null ? _buildConnectionChooser() : _buildBrowser(),
-        bottomNavigationBar: _active != null && _currentHasImages
+        bottomNavigationBar: _active != null && _canImport
             ? _buildImportBar()
             : null,
       ),
@@ -459,7 +484,20 @@ class _WebDavBrowseScreenState extends State<WebDavBrowseScreen> {
 
   Widget _buildImportBar() {
     final count = _images.length;
+    final dirCount = _entries.where((e) => e.isDirectory).length;
     final name = _stack.isEmpty ? '文件夹' : _stack.last.name;
+    final lib = widget.libraryMode;
+
+    // 库模式下即使当前目录没有图片也可以导入 ——
+    // 真正要导入的是**子文件夹**里的内容。
+    final subtitle = lib
+        ? (count > 0 && dirCount > 0
+            ? '本目录 $count 张图 + $dirCount 个子文件夹，全部会成为在线库里的书'
+            : count > 0
+                ? '本目录 $count 张图，会成为在线库里的一本书'
+                : '会扫描这里的 $dirCount 个子文件夹，每个含图片的都成为一本书')
+        : '导入后需要联网阅读，看过的页会自动缓存';
+
     return SafeArea(
       child: Container(
         padding: const EdgeInsets.fromLTRB(16, 10, 16, 10),
@@ -479,19 +517,24 @@ class _WebDavBrowseScreenState extends State<WebDavBrowseScreen> {
                 mainAxisSize: MainAxisSize.min,
                 children: [
                   Text(
-                    '$name · $count 张图片',
+                    lib ? name : '$name · $count 张图片',
                     style: const TextStyle(fontWeight: FontWeight.w600),
                   ),
-                  const Text(
-                    '导入后需要联网阅读，看过的页会自动缓存',
-                    style: TextStyle(fontSize: 11, color: Colors.grey),
+                  Text(
+                    subtitle,
+                    style: const TextStyle(fontSize: 11, color: Colors.grey),
+                    maxLines: 2,
                   ),
                 ],
               ),
             ),
+            const SizedBox(width: 8),
             FilledButton.icon(
-              icon: const Icon(Icons.download_for_offline_outlined, size: 18),
-              label: const Text('导入'),
+              icon: Icon(
+                lib ? Icons.library_add_outlined : Icons.download_for_offline_outlined,
+                size: 18,
+              ),
+              label: Text(lib ? '添加为库' : '导入'),
               onPressed: () {
                 final conn = _active;
                 if (conn == null) return;

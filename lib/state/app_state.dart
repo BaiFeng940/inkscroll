@@ -87,7 +87,7 @@ class AppState extends ChangeNotifier {
   }) async {
     final pick = SourcePick(
       kind: SourcePickKind.webdav,
-      displayName: folderName.isEmpty ? connection.displayLabel : folderName,
+      displayName: folderName.isEmpty ? connection.rootName : folderName,
       sourceId: ByteStore.newBookId(),
       uri: Uri.tryParse(folderUrl),
       webdavConnectionId: connection.id,
@@ -104,6 +104,94 @@ class AppState extends ChangeNotifier {
     }
   }
 
+  /// **把 NAS 上一个文件夹下"所有含图片的子文件夹"批量导入在线库。**
+  ///
+  /// 这是「添加 WebDAV 库」的核心：用户只选一次目录，我们把里面
+  /// 每一话 / 每一本都建成一本书，全部进「在线库」。
+  ///
+  /// 返回扫描到的目录数、成功导入数与失败信息。
+  Future<WebDavLibraryResult> importWebDavLibrary({
+    required WebDavConnection connection,
+    required String folderUrl,
+    required String folderName,
+    void Function(int done, int total, String label)? onScanProgress,
+    void Function(int done, int total, String label)? onImportProgress,
+  }) async {
+    final client = connection.createClient();
+    List<WebDavComicCandidate> candidates;
+    try {
+      _setProgress(0, '正在扫描 NAS 目录…');
+      candidates = await WebDavFolderImporter.scanLibrary(
+        client,
+        folderUrl,
+        onProgress: (done, total, name) {
+          _setProgress(
+            total == 0 ? 0 : done / total * 0.4,
+            '正在扫描 $done/$total：$name',
+          );
+          onScanProgress?.call(done, total, name);
+        },
+      );
+    } finally {
+      client.close();
+    }
+
+    if (candidates.isEmpty) {
+      _setProgress(null, '');
+      return WebDavLibraryResult(
+        scanned: 0,
+        imported: 0,
+        failures: const [],
+        emptyFolder: folderName,
+      );
+    }
+
+    final imported = <BookMeta>[];
+    final failures = <String>[];
+
+    for (var i = 0; i < candidates.length; i++) {
+      final c = candidates[i];
+      final label = '${c.name}（${c.pageCount} 页）';
+      _setProgress(
+        0.4 + 0.6 * (i / candidates.length),
+        '正在导入 ${i + 1}/${candidates.length}：$label',
+      );
+      onImportProgress?.call(i + 1, candidates.length, label);
+
+      try {
+        // 直接建 Document，跳过单本导入的重复扫描
+        final doc = await WebDavFolderImporter.buildFromCandidate(
+          connection: connection,
+          candidate: c,
+        );
+        final pick = SourcePick(
+          kind: SourcePickKind.webdav,
+          displayName: c.name,
+          sourceId: ByteStore.newBookId(),
+          uri: Uri.tryParse(c.url),
+          webdavConnectionId: connection.id,
+          webdavFolderUrl: c.url,
+          webdavFolderName: c.name,
+        );
+        final book = await _persist(pick, doc);
+        imported.add(book);
+      } catch (e) {
+        failures.add('${c.name}: $e');
+      }
+    }
+
+    await webdavConnections.touch(connection.id);
+    books = _prefs.loadBooks();
+    _setProgress(null, '');
+    notifyListeners();
+
+    return WebDavLibraryResult(
+      scanned: candidates.length,
+      imported: imported.length,
+      failures: failures,
+    );
+  }
+
   // ------------------------------------------------------------------
   // 书架
   // ------------------------------------------------------------------
@@ -118,11 +206,43 @@ class AppState extends ChangeNotifier {
 
   List<BookMeta> get favorites => books.where((b) => b.isFavorite).toList();
 
+  /// 这本书是"在线库"（来自 NAS）还是"本地库"
+  static bool isOnline(BookMeta b) => b.source is WebDavSource;
+
+  /// 本地库：文件夹 / 压缩包 / 散图导入的书
+  List<BookMeta> get localBooks {
+    final list = books.where((b) => !isOnline(b)).toList()
+      ..sort((a, b) {
+        final at = a.lastReadAt ?? a.importedAt;
+        final bt = b.lastReadAt ?? b.importedAt;
+        return bt.compareTo(at);
+      });
+    return list;
+  }
+
+  /// 在线库：从 NAS（WebDAV）添加的书
+  List<BookMeta> get onlineBooks {
+    final list = books.where(isOnline).toList()
+      ..sort((a, b) {
+        final at = a.lastReadAt ?? a.importedAt;
+        final bt = b.lastReadAt ?? b.importedAt;
+        return bt.compareTo(at);
+      });
+    return list;
+  }
+
   List<BookMeta> search(String query) {
     final q = query.trim().toLowerCase();
     if (q.isEmpty) return recentBooks;
     // 书名搜索。数据量到几千本时换成 drift + FTS5。
     return recentBooks.where((b) => b.title.toLowerCase().contains(q)).toList();
+  }
+
+  /// 在"某个库"里搜索（空查询返回该库全部，最近读的在前面）
+  List<BookMeta> searchIn(List<BookMeta> pool, String query) {
+    final q = query.trim().toLowerCase();
+    if (q.isEmpty) return pool;
+    return pool.where((b) => b.title.toLowerCase().contains(q)).toList();
   }
 
   Future<void> toggleFavorite(String bookId) async {
@@ -608,4 +728,27 @@ class ImportProgressState {
 class PasswordPromptNeeded implements Exception {
   const PasswordPromptNeeded({required this.attempt});
   final int attempt;
+}
+/// 「添加 WebDAV 库」的批量导入结果
+class WebDavLibraryResult {
+  const WebDavLibraryResult({
+    required this.scanned,
+    required this.imported,
+    required this.failures,
+    this.emptyFolder,
+  });
+
+  /// 扫描到多少个含图片的文件夹
+  final int scanned;
+
+  /// 成功导入多少本
+  final int imported;
+
+  /// 失败明细（书名: 原因）
+  final List<String> failures;
+
+  /// 非空表示"扫描到 0 个目录"，值是用户选的那个文件夹名
+  final String? emptyFolder;
+
+  bool get isEmpty => scanned == 0;
 }

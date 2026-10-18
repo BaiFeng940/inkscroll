@@ -27,12 +27,34 @@ import '../data/webdav/webdav_connection.dart';
 import '../importers/import_utils.dart';
 import '../reader/document.dart';
 
+/// 扫描结果：一个"含图片的文件夹"，对应一本书
+class WebDavComicCandidate {
+  const WebDavComicCandidate({
+    required this.url,
+    required this.name,
+    required this.images,
+  });
+
+  /// 文件夹的绝对 URL
+  final String url;
+
+  /// 文件夹显示名（书名）
+  final String name;
+
+  /// 该目录下的图片条目（已按自然序排好）
+  final List<WebDavEntry> images;
+
+  int get pageCount => images.length;
+
+  @override
+  String toString() => 'WebDavComicCandidate($name, ${images.length} 张)';
+}
+
 class WebDavFolderImporter implements Importer {
   WebDavFolderImporter({this.connection});
 
   /// 识别/构建时用的连接；不传则从 [buildDocument] 的参数取
   final WebDavConnection? connection;
-
   /// 最多嗅探多少张图的真实尺寸（其余用中位数估算）
   static const int sniffSamples = 16;
 
@@ -258,5 +280,91 @@ class WebDavFolderImporter implements Importer {
       h = (h * 0x01000193) & 0xffffffff;
     }
     return h.toRadixString(16);
+  }
+
+  // ------------------------------------------------------------------
+  // 库扫描：一次把"所有含图片的文件夹"找出来
+  // ------------------------------------------------------------------
+
+  /// 扫描出一个"含图片的文件夹"（一本书的候选）
+  ///
+  /// 一次最多扫 [maxScannedFolders] 个子目录，避免用户误选根目录时
+  /// 把整个 NAS 都翻一遍（那会是几百个请求）。
+  static const int maxScannedFolders = 300;
+
+  /// 扫描 [folderUrl] 下所有**含图片的文件夹**（包括它自己）。
+  ///
+  /// 返回的每一项对应"一本书"。调用方可以全量导入，也可以让用户挑。
+  static Future<List<WebDavComicCandidate>> scanLibrary(
+    WebDavClient client,
+    String folderUrl, {
+    void Function(int done, int total, String name)? onProgress,
+  }) async {
+    final out = <WebDavComicCandidate>[];
+
+    final rootEntries = await client.list(folderUrl);
+    final rootImages = _collectImages(rootEntries, client, folderUrl);
+    if (rootImages.isNotEmpty) {
+      out.add(WebDavComicCandidate(
+        url: folderUrl,
+        // 根目录本身有图片 → 用路径最后一段当名字
+        name: _folderNameOf(folderUrl),
+        images: rootImages,
+      ));
+    }
+
+    final subdirs = rootEntries.where((e) => e.isDirectory).toList()
+      ..sort((a, b) => compareByOriginalName(a.name, b.name));
+
+    final scanTargets = subdirs.length > maxScannedFolders
+        ? subdirs.sublist(0, maxScannedFolders)
+        : subdirs;
+
+    var done = 0;
+    for (final dir in scanTargets) {
+      done++;
+      onProgress?.call(done, scanTargets.length, dir.name);
+      try {
+        final entries = await client.list(dir.url);
+        final images = _collectImages(entries, client, dir.url);
+        if (images.isNotEmpty) {
+          out.add(WebDavComicCandidate(
+            url: dir.url,
+            name: dir.name,
+            images: images,
+          ));
+        }
+      } catch (_) {
+        // 单个子目录读失败（权限 / 已删除）不影响其他
+      }
+    }
+
+    return out;
+  }
+
+  static String _folderNameOf(String url) {
+    final segs = Uri.tryParse(url)?.pathSegments.where((s) => s.isNotEmpty).toList();
+    if (segs == null || segs.isEmpty) return 'NAS 文件夹';
+    return segs.last;
+  }
+
+  /// 把单个候选目录构建成 Document（供批量导入直接调用）
+  static Future<Document> buildFromCandidate({
+    required WebDavConnection connection,
+    required WebDavComicCandidate candidate,
+  }) async {
+    final client = connection.createClient();
+    try {
+      return await _build(
+        ctx: null,
+        client: client,
+        conn: connection,
+        folderUrl: candidate.url,
+        folderName: candidate.name,
+        images: candidate.images,
+      );
+    } finally {
+      client.close();
+    }
   }
 }

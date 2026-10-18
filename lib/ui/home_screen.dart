@@ -19,7 +19,7 @@ import '../state/app_state.dart';
 import 'image_order_sheet.dart';
 import 'prepare_screen.dart';
 import 'reader/reader_screen.dart';
-import 'webdav_browse_screen.dart';
+import 'settings_screen.dart';
 
 class HomeScreen extends StatefulWidget {
   const HomeScreen({super.key});
@@ -29,7 +29,7 @@ class HomeScreen extends StatefulWidget {
 }
 
 class _HomeScreenState extends State<HomeScreen> with SingleTickerProviderStateMixin {
-  late final TabController _tabs = TabController(length: 3, vsync: this);
+  late final TabController _tabs = TabController(length: 2, vsync: this);
   final _searchController = TextEditingController();
   String _query = '';
 
@@ -130,15 +130,6 @@ class _HomeScreenState extends State<HomeScreen> with SingleTickerProviderStateM
           manuallyOrdered: !unchanged,
         );
 
-      case _ImportChoice.webdav:
-        final selection = await showWebDavBrowser(
-          context: context,
-          store: app.webdavConnections,
-        );
-        if (selection == null || !mounted) return;
-        await _runWebDavImport(app, selection);
-        // 网络来源有自己的导入路径，不走下面的本地 pick 流程
-        return;
 
       case _ImportChoice.url:
         final url = await _askForText(
@@ -251,32 +242,6 @@ class _HomeScreenState extends State<HomeScreen> with SingleTickerProviderStateM
     }
   }
 
-  /// 从 NAS 导入。
-  ///
-  /// 和本地导入的区别：**没有"准备"阶段**（不需要解压），
-  /// 导入只是列一次目录 + 嗅探少量尺寸，通常一两秒内完成。
-  Future<void> _runWebDavImport(
-    AppState app,
-    WebDavFolderSelection selection,
-  ) async {
-    try {
-      final meta = await app.importWebDav(
-        connection: selection.connection,
-        folderUrl: selection.folderUrl,
-        folderName: selection.folderName,
-      );
-      if (!mounted) return;
-      _snack('已从 NAS 导入：${meta.title}（${meta.pageCount} 页）');
-      await _openBook(meta);
-    } on AppError catch (e) {
-      if (!mounted) return;
-      _snack(e.message, isError: true);
-    } catch (e) {
-      if (!mounted) return;
-      _snack('从 NAS 导入失败：$e', isError: true);
-    }
-  }
-
   Future<void> _openBook(BookMeta book) async {
     final app = context.read<AppState>();
 
@@ -331,78 +296,125 @@ class _HomeScreenState extends State<HomeScreen> with SingleTickerProviderStateM
       return const Scaffold(body: Center(child: CircularProgressIndicator()));
     }
 
+    final theme = Theme.of(context);
+    final topPad = MediaQuery.paddingOf(context).top;
+
+    // ★ 没有 AppBar。
+    //   之前标题栏里放的是"inkScroll"文字 + 一个只会清空搜索框的假搜索按钮，
+    //   既占高度又没用。现在顶部只留**真正要用的东西**：
+    //   搜索框 + 设置按钮，和下方 Tab 一起贴在状态栏底下。
     return Scaffold(
-      appBar: AppBar(
-        title: const Text('inkScroll'),
-        bottom: TabBar(
-          controller: _tabs,
-          tabs: const [
-            Tab(text: '全部'),
-            Tab(text: '最近'),
-            Tab(text: '收藏'),
-          ],
-        ),
-        actions: [
-          IconButton(
-            tooltip: '搜索',
-            icon: const Icon(Icons.search),
-            onPressed: () => setState(() {
-              _query = _query.isEmpty ? ' ' : '';
-              _searchController.text = '';
-              _query = '';
-            }),
-          ),
-        ],
-      ),
       body: Column(
         children: [
-          Padding(
-            padding: const EdgeInsets.fromLTRB(12, 8, 12, 4),
-            child: TextField(
-              controller: _searchController,
-              decoration: InputDecoration(
-                prefixIcon: const Icon(Icons.search, size: 20),
-                hintText: '搜索书名',
-                isDense: true,
-                border: OutlineInputBorder(borderRadius: BorderRadius.circular(10)),
-                suffixIcon: _query.isEmpty
-                    ? null
-                    : IconButton(
-                        icon: const Icon(Icons.clear, size: 18),
-                        onPressed: () {
-                          _searchController.clear();
-                          setState(() => _query = '');
-                        },
+          // ── 顶部：搜索框 + 设置 ──
+          Container(
+            padding: EdgeInsets.fromLTRB(12, topPad + 8, 8, 6),
+            child: Row(
+              children: [
+                Expanded(
+                  child: TextField(
+                    controller: _searchController,
+                    textInputAction: TextInputAction.search,
+                    decoration: InputDecoration(
+                      prefixIcon: const Icon(Icons.search, size: 20),
+                      hintText: _tabs.index == 0 ? '搜索本地库' : '搜索在线库',
+                      isDense: true,
+                      filled: true,
+                      fillColor: theme.colorScheme.surfaceContainerHighest
+                          .withValues(alpha: 0.5),
+                      contentPadding:
+                          const EdgeInsets.symmetric(vertical: 10, horizontal: 8),
+                      border: OutlineInputBorder(
+                        borderRadius: BorderRadius.circular(12),
+                        borderSide: BorderSide.none,
                       ),
-              ),
-              onChanged: (v) => setState(() => _query = v),
+                      suffixIcon: _query.isEmpty
+                          ? null
+                          : IconButton(
+                              icon: const Icon(Icons.clear, size: 18),
+                              onPressed: () {
+                                _searchController.clear();
+                                setState(() => _query = '');
+                              },
+                            ),
+                    ),
+                    onChanged: (v) => setState(() => _query = v),
+                  ),
+                ),
+                const SizedBox(width: 4),
+                IconButton(
+                  tooltip: '设置',
+                  icon: const Icon(Icons.settings_outlined),
+                  onPressed: () async {
+                    await Navigator.of(context).push(
+                      MaterialPageRoute(builder: (_) => const SettingsScreen()),
+                    );
+                    if (mounted) await app.refreshBooks();
+                  },
+                ),
+              ],
             ),
           ),
+
+          // ── Tab：本地库 / 在线库 ──
+          TabBar(
+            controller: _tabs,
+            onTap: (_) => setState(() {}), // 让搜索框 hint 跟着变
+            tabs: const [
+              Tab(text: '本地库'),
+              Tab(text: '在线库'),
+            ],
+          ),
+
           Expanded(
             child: TabBarView(
               controller: _tabs,
               children: [
-                _BookGrid(books: app.search(_query), onOpen: _openBook, onChanged: () => app.refreshBooks(), onDelete: _confirmDelete),
-                _BookGrid(books: app.recentBooks, onOpen: _openBook, onChanged: () => app.refreshBooks(), onDelete: _confirmDelete),
-                _BookGrid(books: _filter(app.favorites, _query), onOpen: _openBook, onChanged: () => app.refreshBooks(), onDelete: _confirmDelete),
+                // 本地库：文件夹 / 压缩包 / 散图
+                _BookGrid(
+                  books: app.searchIn(app.localBooks, _query),
+                  onOpen: _openBook,
+                  onChanged: () => app.refreshBooks(),
+                  onDelete: _confirmDelete,
+                  emptyHint: '本地库还是空的。\n点右下角「导入」添加压缩包、文件夹或图片。',
+                ),
+                // 在线库：NAS（WebDAV）
+                _BookGrid(
+                  books: app.searchIn(app.onlineBooks, _query),
+                  onOpen: _openBook,
+                  onChanged: () => app.refreshBooks(),
+                  onDelete: _confirmDelete,
+                  emptyHint: '在线库还是空的。\n'
+                      '点右上角「设置」→ 添加 WebDAV 库，\n'
+                      '连上 NAS 后选一个漫画根目录，\n'
+                      '它下面每个含图片的子文件夹都会变成一本书。',
+                  emptyAction: TextButton.icon(
+                    icon: const Icon(Icons.settings_outlined, size: 18),
+                    label: const Text('去设置里添加'),
+                    onPressed: () async {
+                      await Navigator.of(context).push(
+                        MaterialPageRoute(
+                            builder: (_) => const SettingsScreen()),
+                      );
+                      if (mounted) await app.refreshBooks();
+                    },
+                  ),
+                ),
               ],
             ),
           ),
         ],
       ),
-      floatingActionButton: FloatingActionButton.extended(
-        onPressed: _showImportSheet,
-        icon: const Icon(Icons.add),
-        label: const Text('导入'),
-      ),
+      floatingActionButton: _tabs.index == 0
+          ? FloatingActionButton.extended(
+              onPressed: _showImportSheet,
+              icon: const Icon(Icons.add),
+              label: const Text('导入'),
+            )
+          : null,
     );
   }
 
-  List<BookMeta> _filter(List<BookMeta> list, String q) {
-    if (q.trim().isEmpty) return list;
-    final lower = q.toLowerCase();
-    return list.where((b) => b.title.toLowerCase().contains(lower)).toList();
-  }
 
   Future<void> _confirmDelete(BookMeta book) async {
     final app = context.read<AppState>();
@@ -494,6 +506,8 @@ class _BookGrid extends StatelessWidget {
     required this.onOpen,
     required this.onChanged,
     required this.onDelete,
+    this.emptyHint,
+    this.emptyAction,
   });
 
   final List<BookMeta> books;
@@ -501,16 +515,37 @@ class _BookGrid extends StatelessWidget {
   final Future<void> Function() onChanged;
   final Future<void> Function(BookMeta) onDelete;
 
+  /// 空列表时显示什么（本地库和在线库提示不同）
+  final String? emptyHint;
+
+  /// 空列表时额外给一个动作按钮
+  final Widget? emptyAction;
+
   @override
   Widget build(BuildContext context) {
     if (books.isEmpty) {
-      return const Center(
+      return Center(
         child: Padding(
-          padding: EdgeInsets.all(32),
-          child: Text(
-            '书架还是空的。\n点右下角「导入」添加内容。',
-            textAlign: TextAlign.center,
-            style: TextStyle(color: Colors.grey),
+          padding: const EdgeInsets.all(32),
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              Icon(
+                emptyAction != null ? Icons.dns_outlined : Icons.collections_bookmark_outlined,
+                size: 40,
+                color: Colors.grey.withValues(alpha: 0.6),
+              ),
+              const SizedBox(height: 12),
+              Text(
+                emptyHint ?? '书架还是空的。\n点右下角「导入」添加内容。',
+                textAlign: TextAlign.center,
+                style: const TextStyle(color: Colors.grey, height: 1.6),
+              ),
+              if (emptyAction != null) ...[
+                const SizedBox(height: 12),
+                emptyAction!,
+              ],
+            ],
           ),
         ),
       );
@@ -732,18 +767,20 @@ class _Thumbnail extends StatelessWidget {
 }
 
 // ---------------------------------------------------------------------------
+/// 本地导入的来源。
+///
+/// 注意：**没有 webdav 了**。NAS 不是"导入一本"，是"配置一个内容源"，
+/// 已经移到「设置 → 添加 WebDAV 库」。
 enum _ImportChoice {
   folder,
   archive,
   images,
-  webdav,
   url;
 
   String get title => switch (this) {
         _ImportChoice.folder => '选择文件夹',
         _ImportChoice.archive => '选择压缩包',
         _ImportChoice.images => '选择图片（可多选）',
-        _ImportChoice.webdav => '从 NAS 导入（WebDAV）',
         _ImportChoice.url => '输入网页链接',
       };
 
@@ -751,7 +788,6 @@ enum _ImportChoice {
         _ImportChoice.folder => '文件夹内图片自动成章，文本自动分章分页',
         _ImportChoice.archive => '支持 zip / tar；rar / 7z 需先转换',
         _ImportChoice.images => '直接按选择顺序生成一本漫画',
-        _ImportChoice.webdav => '飞牛 / 群晖 / 威联通 / Alist，联机阅读，按需下载',
         _ImportChoice.url => '抓取网页正文（需要接入 html 解析，见代码注释）',
       };
 
@@ -759,7 +795,6 @@ enum _ImportChoice {
         _ImportChoice.folder => Icons.folder_open,
         _ImportChoice.archive => Icons.archive_outlined,
         _ImportChoice.images => Icons.image_outlined,
-        _ImportChoice.webdav => Icons.dns_outlined,
         _ImportChoice.url => Icons.link,
       };
 }

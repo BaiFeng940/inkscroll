@@ -109,6 +109,30 @@ void main() {
       const url = 'http://nas:5005/dav/%E6%BC%AB%E7%94%BB/001.jpg';
       expect(WebDavClient.displayNameOf(url), '001.jpg');
     });
+
+    test('未编码的中文 href 会被归一化成合法 URL', () {
+      // 现实里有些简易 WebDAV 服务器直接回未编码的路径。
+      // 以前这里会拼出含空格的非法 URL，导致子目录内容全读不到（且无提示）。
+      final c = WebDavClient(baseUrl: 'http://nas:5005/dav');
+      final got = c.resolveHref(
+        '/dav/第01话 火影/001.jpg',
+        Uri.parse('http://nas:5005/dav/'),
+      );
+      expect(got, contains('%E7%AC%AC01%E8%AF%9D'));
+      expect(got, contains('%20')); // 空格必须被编码
+      expect(got, isNot(contains(' ')));
+      expect(Uri.parse(got).pathSegments.last, '001.jpg');
+    });
+
+    test('已编码的 href 不会被二次编码', () {
+      final c = WebDavClient(baseUrl: 'http://nas:5005/dav');
+      final got = c.resolveHref(
+        '/dav/%E6%BC%AB%E7%94%BB/001.jpg',
+        Uri.parse('http://nas:5005/dav/'),
+      );
+      expect(got, 'http://nas:5005/dav/%E6%BC%AB%E7%94%BB/001.jpg');
+      expect(got, isNot(contains('%25'))); // 二次编码的标志
+    });
   });
 
   group('WebDavClient · 多状态解析', () {
