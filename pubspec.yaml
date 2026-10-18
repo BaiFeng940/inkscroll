@@ -1,7 +1,7 @@
 name: inkscroll
 description: "inkScroll — Flutter 漫画/文档阅读器：压缩包按需解压、虚拟长页、高刷新率适配。"
 publish_to: 'none'
-version: 0.1.0+1
+version: 0.2.0+2
 
 environment:
   # 本机实测：Flutter 3.47.7 / Dart 3.13.5
@@ -21,17 +21,23 @@ dependencies:
   crypto: ^3.0.3              # 导入指纹（去重）
   path: ^1.9.0
 
+  # ---- 网络（WebDAV / 飞牛 NAS）----
+  # 只加两个**纯 Dart** 依赖，不引任何原生插件：
+  #   http 做 PROPFIND / GET，xml 解析 WebDAV 的多状态响应（207 Multi-Status）。
+  # 之所以自己写 WebDAV 客户端而不用现成的 webdav_client 包：
+  # 需要在 GET 上做 Range 头部嗅探（只下前 64KB 就能拿到图片尺寸），
+  # 以及自定义超时/重试/并发策略，自己写反而更可控。
+  http: ^1.2.2
+  xml: ^6.5.0
+
   # ---- 后续阶段按需解注（接入指引见对应 importer 文件顶部注释）----
   # pdfx: ^2.6.0                # PDF 渲染（MIT）
-  # xml: ^6.5.0                 # DOCX 解析
   # html: ^0.15.4               # 网页正文解析
-  # dio: ^5.7.0                 # 网络 + Range + CancelToken
   # fast_gbk: ^1.0.0            # GBK/GB18030 纯 Dart 解码
   # charset_converter: ^2.1.0   # 平台编码探测（Android CharsetDetector）
   # extended_image: ^8.2.0      # 需要更强图片手势时
   # drift: ^2.20.0              # 书多了之后换数据库
-  # flutter_secure_storage: ^9.2.2  # 记住压缩包密码 / 网盘 token
-  # webdav_client: ^1.2.1       # WebDAV 网盘（零合规风险）
+  # flutter_secure_storage: ^9.2.2  # 需要把 NAS 密码存进 Keystore 时
 
 dev_dependencies:
   flutter_test:

@@ -17,6 +17,12 @@ sealed class BookSource {
         return LooseFilesSource(
           (json['paths'] as List).cast<String>(),
         );
+      case 'webdav':
+        return WebDavSource(
+          connectionId: json['connectionId'] as String? ?? '',
+          folderUrl: json['folderUrl'] as String? ?? '',
+          folderName: json['folderName'] as String? ?? '',
+        );
       case 'archive':
       default:
         return ArchiveSourceSpec(
@@ -55,6 +61,36 @@ final class LooseFilesSource extends BookSource {
 
   @override
   Map<String, dynamic> toJson() => {'type': 'looseFiles', 'paths': paths};
+}
+
+/// 网络（WebDAV / NAS）上的一个文件夹
+///
+/// 只记录**连接 id + 文件夹地址**，凭据单独存在连接表里。
+/// 这样：
+///   · 密码改了只要更新连接表，不用重导入每一本书；
+///   · 导出的书目 JSON 里不会混进密码。
+final class WebDavSource extends BookSource {
+  const WebDavSource({
+    required this.connectionId,
+    required this.folderUrl,
+    required this.folderName,
+  });
+
+  final String connectionId;
+
+  /// 文件夹的绝对 URL（已编码）
+  final String folderUrl;
+
+  /// 文件夹显示名（书籍标题的来源之一）
+  final String folderName;
+
+  @override
+  Map<String, dynamic> toJson() => {
+        'type': 'webdav',
+        'connectionId': connectionId,
+        'folderUrl': folderUrl,
+        'folderName': folderName,
+      };
 }
 
 // ---------------------------------------------------------------------------

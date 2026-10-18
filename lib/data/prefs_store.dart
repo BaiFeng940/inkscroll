@@ -17,6 +17,13 @@ class PrefsStore {
 
   final SharedPreferences _prefs;
 
+  /// 底层实例。
+  ///
+  /// 给 `WebDavConnectionStore` 这类"独立小存储"用 ——
+  /// 与其让每个新功能都往 PrefsStore 上加一堆方法，
+  /// 不如把底层这一层直接暴露出去。
+  SharedPreferences get prefs => _prefs;
+
   static const _kBooks = 'books.v1';
   static const _kSettings = 'settings.v1';
 

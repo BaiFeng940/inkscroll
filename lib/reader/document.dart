@@ -57,6 +57,23 @@ final class InlineRef extends ContentRef {
   final List<int> bytes;
 }
 
+/// 网络（WebDAV / NAS）上的文件
+///
+/// 只存"在哪"，绝不存字节 —— 和另外两种 ref 一样遵守模型的铁律。
+/// 真正的字节由 `WebDavPageByteResolver` 按需拉取并落盘缓存。
+final class WebDavRef extends ContentRef {
+  const WebDavRef({required this.url, required this.connectionId});
+
+  /// **绝对且已编码**的 URL，可直接 GET
+  final String url;
+
+  /// 指向哪个 NAS 连接（凭据按 id 存在连接表里，不散落在每一页上）
+  final String connectionId;
+
+  @override
+  String toString() => 'WebDavRef($connectionId :: $url)';
+}
+
 // ---------------------------------------------------------------------------
 // 页内容
 // ---------------------------------------------------------------------------

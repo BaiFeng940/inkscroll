@@ -47,6 +47,15 @@ class ImportRouter {
   /// 探测来源。**只读头部字节**，绝不整文件读入。
   Future<RoutedImport> route(SourcePick pick) async {
     switch (pick.kind) {
+      case SourcePickKind.webdav:
+        // 网络来源由 AppState 直接分派给 WebDavFolderImporter，
+        // 不会走到这里。留一个明确的失败而不是静默走错分支。
+        return RoutedImport(
+          importer: null,
+          probe: const SourceProbe(formatName: 'webdav', entryNames: []),
+          earlyFailure: const GenericError('网络来源应直接由 WebDAV 导入器处理'),
+        );
+
       case SourcePickKind.folder:
         return RoutedImport(
           importer: _folder,

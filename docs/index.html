@@ -130,6 +130,7 @@
     <div class="sp"></div>
     <a class="lnk" href="#features">功能</a>
     <a class="lnk" href="#shots">截图</a>
+    <a class="lnk" href="#nas">NAS</a>
     <a class="lnk" href="#tech">技术</a>
     <a class="lnk" href="#install">安装</a>
     <a class="btn ghost" style="padding:8px 16px;font-size:13.5px" href="https://github.com/BaiFeng940/inkscroll">GitHub</a>
@@ -142,11 +143,11 @@
     <p class="lead">
       inkScroll 是一个 Android 优先的本地漫画 / 文档阅读器。
       压缩包不解压整个文件、图片永远保持原始比例、多页无缝拼成一条长页，
-      并针对 120Hz 高刷屏做了适配。
+      还能直接连你的 NAS 在线看漫画 —— 并针对 120Hz 高刷屏做了适配。
     </p>
     <div class="btns">
       <a class="btn primary" href="https://github.com/BaiFeng940/inkscroll/releases/latest">
-        ⬇ 下载 APK <span style="opacity:.75;font-weight:500">v0.1.0</span>
+        ⬇ 下载 APK <span style="opacity:.75;font-weight:500">v0.2.0</span>
       </a>
       <a class="btn ghost" href="#tech">看看怎么实现的</a>
     </div>
@@ -198,9 +199,9 @@
         <p><code>2.jpg</code> 排在 <code>10.jpg</code> 前面，而不是字典序。导入前还能手动调整顺序，上移、下移、置顶都支持。</p>
       </div>
       <div class="card">
-        <div class="ico">🔍</div>
-        <h3>格式识别到位</h3>
-        <p>PNG / JPEG / GIF / WebP / BMP / ICO / AVIF / HEIC / QOI 头部解析，文件夹导入时用内容嗅探兜底，扩展名不对也能认出来。</p>
+        <div class="ico">🖧</div>
+        <h3>连 NAS 在线看</h3>
+        <p>用 WebDAV 直连飞牛 OS / 群晖 / 威联通 / Alist。只列目录不下载，翻到哪页拉哪页，看过的自动缓存到本地。</p>
       </div>
       <div class="card">
         <div class="ico">🎛️</div>
@@ -290,6 +291,71 @@
         <p>仓库里的 <code>DESIGN.md</code> 记录了完整架构决策与取舍，
            <code>README.md</code> 有每一轮修复的根因分析——包括那些失败的尝试。</p>
       </div>
+    </div>
+  </div>
+</section>
+
+<section id="nas" style="background:var(--bg2);border-block:1px solid var(--line)">
+  <div class="wrap">
+    <div class="eyebrow">NAS / WebDAV</div>
+    <h2>直接连你的 NAS 看漫画</h2>
+    <p class="sub">
+      支持 <strong>飞牛 OS（fnOS）</strong>、群晖、威联通、Alist、Nextcloud ——
+      只要 NAS 开了 WebDAV 就行。不需要装任何服务端插件。
+    </p>
+
+    <div class="grid g3" style="margin-top:30px">
+      <div class="card">
+        <div class="ico">1️⃣</div>
+        <h3>在 NAS 上开启 WebDAV</h3>
+        <p>飞牛 OS：设置 → 文件服务 → WebDAV → 开启。记住端口（默认 <code>5005</code>）与路径（通常 <code>/dav</code>）。</p>
+      </div>
+      <div class="card">
+        <div class="ico">2️⃣</div>
+        <h3>在 App 里填地址</h3>
+        <p>导入 → 从 NAS 导入（WebDAV），填 <code>http://192.168.1.10:5005/dav</code> 与账号密码。连接会被记住。</p>
+      </div>
+      <div class="card">
+        <div class="ico">3️⃣</div>
+        <h3>进目录点导入</h3>
+        <p>列出文件夹，进入放图片的目录，点导入即可开始阅读。不下载整本，翻到哪页拉哪页。</p>
+      </div>
+    </div>
+
+    <table style="margin-top:34px">
+      <thead><tr><th>行为</th><th>说明</th></tr></thead>
+      <tbody>
+        <tr>
+          <td>导入时</td>
+          <td>只发一次 <code>PROPFIND</code> 列目录，<strong>不下载任何图片</strong>，并只用前 64KB 嗅探少量图片的尺寸</td>
+        </tr>
+        <tr>
+          <td>翻页时</td>
+          <td>拉当前页 + 后台预取前后各 2 页；拉下来的页落盘缓存，第二次看就是本地文件</td>
+        </tr>
+        <tr>
+          <td>断网时</td>
+          <td class="ok">已缓存的页照样能看，没缓存的会提示网络错误</td>
+        </tr>
+        <tr>
+          <td>连不上时</td>
+          <td>会区分「地址不对 / 账号错 / 根本不是 WebDAV / 自签证书」，并给出可操作的建议</td>
+        </tr>
+      </tbody>
+    </table>
+
+    <p class="sub" style="margin-top:26px">
+      也可以在电脑上先诊断：<code>dart run tool/webdav_probe.dart &lt;URL&gt; &lt;用户名&gt; &lt;密码&gt;</code>
+    </p>
+
+    <div class="card" style="margin-top:20px;border-color:#4a3b1f;background:#1d1a12">
+      <h3 style="color:#ffc53d">⚠ 关于密码存储</h3>
+      <p>
+        密码存在应用私有目录，并做了一层 XOR + Base64 <strong>混淆</strong>。
+        必须说清楚：<strong>这是混淆，不是加密</strong> —— 密钥编译在 apk 里。
+        更推荐的做法是在 NAS 上单独建一个<strong>只读</strong>的 WebDAV 账号给阅读器用，
+        这样就算泄露也只能读到指定目录。
+      </p>
     </div>
   </div>
 </section>

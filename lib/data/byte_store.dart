@@ -70,6 +70,12 @@ class ByteStore {
   /// 解压产物目录：<bookDir>/extracted
   String extractedDirFor(String bookId) => p.join(bookDir(bookId), 'extracted');
 
+  /// WebDAV 页的磁盘缓存目录：<bookDir>/netcache
+  ///
+  /// 和 `extracted` 一样属于**可随时删除**的缓存：
+  /// 删掉只是回到"每次翻页都走网络"，不影响书籍本身。
+  String webdavCacheDirFor(String bookId) => p.join(bookDir(bookId), 'netcache');
+
   /// 某个压缩包条目解压后的落盘路径。
   ///
   /// 条目名形如 `第01话/001.jpg`，直接当路径会有目录层级与非法字符问题，

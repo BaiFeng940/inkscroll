@@ -23,10 +23,13 @@ import '../data/importer.dart';
 import '../data/models/book_meta.dart';
 import '../data/models/reader_settings.dart';
 import '../data/prefs_store.dart';
+import '../data/webdav/webdav_connection.dart';
 import '../importers/import_router.dart';
+import '../importers/webdav_folder_importer.dart';
 import '../reader/document.dart';
 import '../reader/document_codec.dart';
 import '../reader/page_cache.dart';
+import '../reader/webdav_page_resolver.dart';
 
 class AppState extends ChangeNotifier {
   AppState(this._prefs);
@@ -38,6 +41,11 @@ class AppState extends ChangeNotifier {
 
   /// 后台解压管理器：把压缩包解压到 app 缓存，让翻页变成直接读文件
   ExtractionManager? _extraction;
+
+  /// NAS 连接表（凭据持久化在这里）
+  WebDavConnectionStore? _webdavStore;
+
+  WebDavConnectionStore get webdavConnections => _webdavStore!;
 
   ByteStore get store => _store!;
   ImportRouter get router => _router!;
@@ -57,10 +65,43 @@ class AppState extends ChangeNotifier {
     _store = await ByteStore.open();
     _router = ImportRouter(store: _store!);
     _extraction = ExtractionManager(store: _store!);
+    _webdavStore = WebDavConnectionStore(_prefs.prefs);
     books = _prefs.loadBooks();
     settings = _prefs.loadSettings();
     ready = true;
     notifyListeners();
+  }
+
+  // ------------------------------------------------------------------
+  // WebDAV / NAS 导入
+  // ------------------------------------------------------------------
+
+  /// 从 NAS 的一个文件夹导入成书。
+  ///
+  /// **只列目录，不下载图片** —— 打开只需要一次 PROPFIND，
+  /// 之后每页在阅读时按需拉取并落盘缓存。
+  Future<BookMeta> importWebDav({
+    required WebDavConnection connection,
+    required String folderUrl,
+    required String folderName,
+  }) async {
+    final pick = SourcePick(
+      kind: SourcePickKind.webdav,
+      displayName: folderName.isEmpty ? connection.displayLabel : folderName,
+      sourceId: ByteStore.newBookId(),
+      uri: Uri.tryParse(folderUrl),
+      webdavConnectionId: connection.id,
+      webdavFolderUrl: folderUrl,
+      webdavFolderName: folderName,
+    );
+
+    try {
+      final book = await _runImport(pick, password: null);
+      await webdavConnections.touch(connection.id);
+      return book;
+    } finally {
+      _setProgress(null, '');
+    }
   }
 
   // ------------------------------------------------------------------
@@ -148,11 +189,27 @@ class AppState extends ChangeNotifier {
   }
 
   Future<BookMeta> _runImport(SourcePick pick, {required String? password}) async {
-    final routed = await router.route(pick);
-    if (routed.earlyFailure != null) throw routed.earlyFailure!;
-
-    final importer = routed.importer;
-    if (importer == null) throw const ImportEmptyError();
+    // ★ WebDAV 不走 router：router 探的是**本地文件**（读头部判断格式），
+    //   而 NAS 上的内容还没下载，无从探测。直接交给专用导入器。
+    final Importer importer;
+    if (pick.kind == SourcePickKind.webdav) {
+      // 注意：连接必须从 pick 上的 connectionId **查出来传进去**。
+      // 漏传的话导入器只会返回"缺少 NAS 连接信息"，表现就成了
+      // "点了导入什么都没发生"（错误提示一闪而过，很容易漏看）。
+      final conn = webdavConnections.byId(pick.webdavConnectionId ?? '');
+      if (conn == null) {
+        throw const GenericError(
+          '找不到这条 NAS 连接。\n请在「从 NAS 导入」里重新选择一次。',
+        );
+      }
+      importer = WebDavFolderImporter(connection: conn);
+    } else {
+      final routed = await router.route(pick);
+      if (routed.earlyFailure != null) throw routed.earlyFailure!;
+      final r = routed.importer;
+      if (r == null) throw const ImportEmptyError();
+      importer = r;
+    }
 
     _setProgress(0, '准备导入…');
 
@@ -222,6 +279,12 @@ class AppState extends ChangeNotifier {
         // 散图的实际路径不放在这里：导入时已经复制进私有目录，
         // 打开时直接扫 store.folderPathFor(bookId)。见 _rebuildFileDocument。
         return const LooseFilesSource([]);
+      case SourcePickKind.webdav:
+        return WebDavSource(
+          connectionId: pick.webdavConnectionId ?? '',
+          folderUrl: pick.webdavFolderUrl ?? '',
+          folderName: pick.webdavFolderName ?? pick.displayName,
+        );
       case SourcePickKind.file:
       case SourcePickKind.url:
         return ArchiveSourceSpec(
@@ -248,6 +311,29 @@ class AppState extends ChangeNotifier {
       case LooseFilesSource():
         final doc = cached ?? await _rebuildFileDocument(book);
         return (document: doc, resolver: FilePageByteResolver());
+
+      case WebDavSource(:final connectionId, :final folderUrl, :final folderName):
+        final conn = webdavConnections.byId(connectionId);
+        if (conn == null) {
+          throw const GenericError(
+            '这条 NAS 连接已被删除。\n'
+            '请重新添加 NAS 后再次导入这本书。',
+          );
+        }
+        final doc = cached ??
+            await WebDavFolderImporter.buildDocument(
+              connection: conn,
+              folderUrl: folderUrl,
+              folderName: folderName,
+            );
+        return (
+          document: doc,
+          resolver: WebDavPageByteResolver(
+            client: conn.createClient(),
+            cacheDir: Directory(store.webdavCacheDirFor(book.id)),
+            pageList: doc.pagesInOrder,
+          ),
+        );
 
       case ArchiveSourceSpec(:final path):
         final src = await FileByteSource.open(path);

@@ -17,7 +17,7 @@ import 'byte_source.dart';
 // 用户选了什么
 // ---------------------------------------------------------------------------
 
-enum SourcePickKind { file, files, folder, url }
+enum SourcePickKind { file, files, folder, url, webdav }
 
 class SourcePick {
   const SourcePick({
@@ -31,6 +31,9 @@ class SourcePick {
     this.modifiedAt,
     this.alreadyLocal = false,
     this.manuallyOrdered = false,
+    this.webdavConnectionId,
+    this.webdavFolderUrl,
+    this.webdavFolderName,
   });
 
   final SourcePickKind kind;
@@ -57,6 +60,17 @@ class SourcePick {
   /// 为 false（默认）时导入器会按**原始文件名自然排序**；
   /// 为 true 时原样保留调用方给的顺序。
   final bool manuallyOrdered;
+
+  // ---- WebDAV / NAS ----
+
+  /// 用哪条 NAS 连接（凭据存在连接表里，不在 pick 上）
+  final String? webdavConnectionId;
+
+  /// 目标文件夹的绝对 URL
+  final String? webdavFolderUrl;
+
+  /// 文件夹显示名（用作书籍标题）
+  final String? webdavFolderName;
 }
 
 /// 格式探测结果

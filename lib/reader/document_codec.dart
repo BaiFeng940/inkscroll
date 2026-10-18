@@ -24,6 +24,16 @@ class DocumentCodec {
   static String pathFor(String bookDir) => p.join(bookDir, 'document.json');
 
   static Future<void> save(String bookDir, Document doc) async {
+    // ★ 必须先确保目录存在。
+    //   本地导入的书目录是"复制文件时顺带建好"的，所以以前没暴露问题；
+    //   但 WebDAV 导入**不往书目录里复制任何文件**，目录也就不存在，
+    //   于是写 document.json.tmp 直接抛 PathNotFoundException。
+    //   在这里兜底比在每个调用方各建一次可靠得多。
+    final dir = Directory(bookDir);
+    if (!await dir.exists()) {
+      await dir.create(recursive: true);
+    }
+
     final file = File(pathFor(bookDir));
     final tmp = File('${file.path}.tmp');
     // 先写临时文件再改名：避免写入过程中被杀导致文件损坏
@@ -181,6 +191,8 @@ class DocumentCodec {
       case InlineRef():
         // InlineRef 只用于极小内容，序列化成 base64
         return {'t': 'inline', 'b64': base64Encode(ref.bytes)};
+      case WebDavRef():
+        return {'t': 'webdav', 'url': ref.url, 'conn': ref.connectionId};
     }
   }
 
@@ -194,6 +206,11 @@ class DocumentCodec {
         );
       case 'inline':
         return InlineRef(base64Decode(m['b64'] as String));
+      case 'webdav':
+        return WebDavRef(
+          url: m['url'] as String,
+          connectionId: m['conn'] as String? ?? '',
+        );
       case 'file':
       default:
         return LooseFileRef(m['path'] as String);

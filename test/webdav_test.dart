@@ -1,0 +1,384 @@
+/// WebDAV 客户端与连接存储的单元测试。
+///
+/// ## 为什么这些测试很重要
+///
+/// WebDAV 的坑几乎全在**解析**上，而不是网络：
+///   · 命名空间前缀五花八门（`D:` / `d:` / `lp1:`）
+///   · href 是百分号编码的（中文目录名）
+///   · `Depth:1` 会把自己也列出来
+///   · 有些 NAS 对错误地址返回 `200 + HTML` 而不是 404
+///
+/// 这些都能用假的 `http.Client` 覆盖，不需要真的 NAS。
+library;
+
+import 'dart:convert';
+import 'dart:typed_data';
+
+import 'package:flutter_test/flutter_test.dart';
+import 'package:http/http.dart' as http;
+import 'package:http/testing.dart';
+import 'package:shared_preferences/shared_preferences.dart';
+import 'package:inkscroll/core/errors.dart';
+import 'package:inkscroll/data/webdav/webdav_client.dart';
+import 'package:inkscroll/data/models/book_meta.dart';
+import 'package:inkscroll/data/webdav/webdav_connection.dart';
+
+/// 造一个多状态响应
+String multistatus(String body) =>
+    '<?xml version="1.0" encoding="utf-8"?>\n'
+    '<D:multistatus xmlns:D="DAV:">$body</D:multistatus>';
+
+String responseEntry({
+  required String href,
+  String? displayName,
+  bool isDir = false,
+  int? size,
+  String prefix = 'D',
+}) {
+  final props = StringBuffer();
+  if (displayName != null) {
+    props.write('<$prefix:displayname>$displayName</$prefix:displayname>');
+  }
+  if (size != null) {
+    props.write('<$prefix:getcontentlength>$size</$prefix:getcontentlength>');
+  }
+  props.write(isDir
+      ? '<$prefix:resourcetype><$prefix:collection/></$prefix:resourcetype>'
+      : '<$prefix:resourcetype/>');
+  return '<$prefix:response>'
+      '<$prefix:href>$href</$prefix:href>'
+      '<$prefix:propstat>'
+      '<$prefix:prop>$props</$prefix:prop>'
+      '<$prefix:status>HTTP/1.1 200 OK</$prefix:status>'
+      '</$prefix:propstat>'
+      '</$prefix:response>';
+}
+
+/// 一个只会返回固定 XML 的假客户端
+http.Client fakeClientReturning(String xml, {int status = 207}) {
+  return MockClient((request) async {
+    return http.Response(
+      xml,
+      status,
+      headers: {'content-type': 'application/xml; charset=utf-8'},
+    );
+  });
+}
+
+void main() {
+  group('WebDavClient · 地址归一化', () {
+    test('缺协议时补 http://', () {
+      final c = WebDavClient(baseUrl: '192.168.1.10:5005/dav');
+      expect(c.baseUrl, 'http://192.168.1.10:5005/dav');
+    });
+
+    test('去掉末尾斜杠', () {
+      final c = WebDavClient(baseUrl: 'http://nas.local:5005/dav///');
+      expect(c.baseUrl, 'http://nas.local:5005/dav');
+    });
+
+    test('保留 https', () {
+      final c = WebDavClient(baseUrl: 'https://nas.local/dav/');
+      expect(c.baseUrl, 'https://nas.local/dav');
+    });
+
+    test('origin 只保留 scheme+authority', () {
+      final c = WebDavClient(baseUrl: 'http://192.168.1.10:5005/dav/sub');
+      expect(c.origin, 'http://192.168.1.10:5005');
+    });
+  });
+
+  group('WebDavClient · href 解析', () {
+    test('绝对路径拼上 origin', () {
+      final c = WebDavClient(baseUrl: 'http://nas:5005/dav');
+      expect(
+        c.resolveHref('/dav/comic/001.jpg', Uri.parse('http://nas:5005/dav/')),
+        'http://nas:5005/dav/comic/001.jpg',
+      );
+    });
+
+    test('已经是绝对 URL 时原样返回', () {
+      final c = WebDavClient(baseUrl: 'http://nas:5005/dav');
+      expect(
+        c.resolveHref('https://other/dav/x.jpg', Uri.parse('http://nas:5005/dav/')),
+        'https://other/dav/x.jpg',
+      );
+    });
+
+    test('中文目录名解码正确', () {
+      const url = 'http://nas:5005/dav/%E6%BC%AB%E7%94%BB/001.jpg';
+      expect(WebDavClient.displayNameOf(url), '001.jpg');
+    });
+  });
+
+  group('WebDavClient · 多状态解析', () {
+    test('解析出目录与文件，并过滤掉自己', () async {
+      final xml = multistatus(
+        responseEntry(href: '/dav/', isDir: true, displayName: 'dav') +
+            responseEntry(href: '/dav/%E6%BC%AB%E7%94%BB/', isDir: true, displayName: '漫画') +
+            responseEntry(href: '/dav/%E6%BC%AB%E7%94%BB/001.jpg', displayName: '001.jpg', size: 60047) +
+            responseEntry(href: '/dav/%E6%BC%AB%E7%94%BB/002.jpg', displayName: '002.jpg', size: 58590),
+      );
+
+      final client = WebDavClient(
+        baseUrl: 'http://nas:5005/dav',
+        httpClient: fakeClientReturning(xml),
+      );
+      final entries = await client.list('http://nas:5005/dav');
+
+      // 自己（/dav/）被过滤，剩 3 项
+      expect(entries.length, 3);
+
+      final dir = entries.firstWhere((e) => e.name == '漫画');
+      expect(dir.isDirectory, isTrue);
+      expect(dir.url, 'http://nas:5005/dav/%E6%BC%AB%E7%94%BB/');
+
+      final f1 = entries.firstWhere((e) => e.name == '001.jpg');
+      expect(f1.isDirectory, isFalse);
+      expect(f1.size, 60047);
+      expect(f1.extension, '.jpg');
+    });
+
+    test('支持小写 d: 前缀', () async {
+      final xml = '<?xml version="1.0"?>'
+          '<d:multistatus xmlns:d="DAV:">'
+          '${responseEntry(href: '/dav/a.jpg', displayName: 'a.jpg', size: 10, prefix: 'd')}'
+          '</d:multistatus>';
+      final client = WebDavClient(
+        baseUrl: 'http://nas/dav',
+        httpClient: fakeClientReturning(xml),
+      );
+      final entries = await client.list('http://nas/dav');
+      expect(entries.single.name, 'a.jpg');
+    });
+
+    test('支持 lp1: 这类自定义前缀', () async {
+      final xml = '<?xml version="1.0"?>'
+          '<lp1:multistatus xmlns:lp1="DAV:">'
+          '${responseEntry(href: '/dav/b.jpg', displayName: 'b.jpg', prefix: 'lp1')}'
+          '</lp1:multistatus>';
+      final client = WebDavClient(
+        baseUrl: 'http://nas/dav',
+        httpClient: fakeClientReturning(xml),
+      );
+      final entries = await client.list('http://nas/dav');
+      expect(entries.single.name, 'b.jpg');
+    });
+
+    test('没有 displayname 时从 href 取名字', () async {
+      final xml = multistatus(
+        responseEntry(href: '/dav/%E7%AC%AC01%E8%AF%9D.jpg', size: 1),
+      );
+      final client = WebDavClient(
+        baseUrl: 'http://nas/dav',
+        httpClient: fakeClientReturning(xml),
+      );
+      final entries = await client.list('http://nas/dav');
+      expect(entries.single.name, '第01话.jpg');
+    });
+  });
+
+  group('WebDavClient · 错误映射', () {
+    test('401 → NetworkAuthError', () async {
+      final client = WebDavClient(
+        baseUrl: 'http://nas/dav',
+        httpClient: MockClient((_) async => http.Response('denied', 401)),
+      );
+      expect(
+        () => client.list('http://nas/dav'),
+        throwsA(isA<NetworkAuthError>()),
+      );
+    });
+
+    test('404 → NetworkHttpError(404)', () async {
+      final client = WebDavClient(
+        baseUrl: 'http://nas/dav',
+        httpClient: MockClient((_) async => http.Response('nope', 404)),
+      );
+      expect(
+        () => client.list('http://nas/dav'),
+        throwsA(isA<NetworkHttpError>()
+            .having((e) => e.statusCode, 'statusCode', 404)),
+      );
+    });
+
+    test('200 + HTML（地址填成了网页）→ NotWebDavError', () async {
+      final client = WebDavClient(
+        baseUrl: 'http://nas',
+        // 注意：http.Response(String) 在没有 charset 时按 Latin-1 编码，
+        // 中文会直接抛 "Contains invalid characters"。用字节构造才正确。
+        httpClient: MockClient((_) async => http.Response.bytes(
+              utf8.encode('<html><body>飞牛 NAS 管理页面</body></html>'),
+              200,
+            )),
+      );
+      expect(
+        () => client.list('http://nas'),
+        throwsA(isA<NotWebDavError>()),
+      );
+    });
+  });
+
+  group('WebDavClient · Range 取头部', () {
+    test('服务器返回 206 时原样返回', () async {
+      final bytes = Uint8List.fromList(List.filled(32, 0xFF));
+      final client = WebDavClient(
+        baseUrl: 'http://nas/dav',
+        httpClient: MockClient((req) async {
+          expect(req.headers['Range'], 'bytes=0-31');
+          return http.Response.bytes(bytes, 206);
+        }),
+      );
+      final got = await client.getRange('http://nas/dav/x.jpg', maxBytes: 32);
+      expect(got.length, 32);
+    });
+
+    test('服务器忽略 Range 返回全量时被截断', () async {
+      final big = Uint8List.fromList(List.filled(1000, 0x01));
+      final client = WebDavClient(
+        baseUrl: 'http://nas/dav',
+        httpClient: MockClient((_) async => http.Response.bytes(big, 200)),
+      );
+      final got = await client.getRange('http://nas/dav/x.jpg', maxBytes: 64);
+      expect(got.length, 64);
+    });
+  });
+
+  group('WebDavConnection · 密码混淆存取', () {
+    test('存进去的是密文，读出来是原文', () {
+      const conn = WebDavConnection(
+        id: 'c1',
+        label: '家里的飞牛',
+        baseUrl: 'http://192.168.1.10:5005/dav',
+        username: 'reader',
+        password: 'my-secret-pw',
+      );
+      final json = conn.toJson();
+
+      // 序列化结果里不应出现明文
+      final encoded = jsonEncode(json);
+      expect(encoded.contains('my-secret-pw'), isFalse);
+      expect(json['password'], isNot(equals('my-secret-pw')));
+
+      // 反序列化能还原
+      final back = WebDavConnection.fromJson(json);
+      expect(back.password, 'my-secret-pw');
+      expect(back.username, 'reader');
+      expect(back.baseUrl, conn.baseUrl);
+    });
+
+    test('空密码不会炸', () {
+      const conn = WebDavConnection(
+        id: 'c2',
+        label: '',
+        baseUrl: 'http://nas/dav',
+      );
+      final back = WebDavConnection.fromJson(conn.toJson());
+      expect(back.password, '');
+      expect(back.displayLabel, 'http://nas/dav');
+    });
+
+    test('密文损坏时退回空密码而不是崩溃', () {
+      final back = WebDavConnection.fromJson({
+        'id': 'c3',
+        'label': 'x',
+        'baseUrl': 'http://nas/dav',
+        'password': '!!!not-base64!!!',
+      });
+      expect(back.password, '');
+    });
+  });
+
+  group('WebDavConnectionStore · 空存储', () {
+    // 这一组是为了一个真机上抓到的崩溃补的：
+    // `_loadRaw()` 曾经在没数据时返回 `const []`，而 `all()` 会 sort 它，
+    // 于是「点开 NAS 导入」直接红屏：
+    //   Unsupported operation: Cannot modify an unmodifiable list
+    late WebDavConnectionStore store;
+
+    setUp(() async {
+      SharedPreferences.setMockInitialValues({});
+      final prefs = await SharedPreferences.getInstance();
+      store = WebDavConnectionStore(prefs);
+    });
+
+    test('空存储时 all() 不抛异常，返回空列表', () {
+      expect(store.all(), isEmpty);
+    });
+
+    test('空存储时 upsert 可以追加，并且能被读回', () async {
+      await store.upsert(const WebDavConnection(
+        id: 'c1',
+        label: '家里的飞牛',
+        baseUrl: 'http://192.168.1.10:5005/dav',
+        username: 'reader',
+        password: 'pw',
+      ));
+
+      final all = store.all();
+      expect(all.length, 1);
+      expect(all.first.label, '家里的飞牛');
+      expect(all.first.password, 'pw');
+    });
+
+    test('空存储时 remove / touch 不抛异常', () async {
+      await store.remove('nope');
+      await store.touch('nope');
+      expect(store.all(), isEmpty);
+    });
+
+    test('按 id 查找', () async {
+      await store.upsert(const WebDavConnection(
+        id: 'c9',
+        label: 'x',
+        baseUrl: 'http://nas/dav',
+      ));
+      expect(store.byId('c9')?.baseUrl, 'http://nas/dav');
+      expect(store.byId('missing'), isNull);
+    });
+
+    test('最近用过的排在前面', () async {
+      await store.upsert(WebDavConnection(
+        id: 'old',
+        label: 'old',
+        baseUrl: 'http://a/dav',
+        lastUsedAt: DateTime(2024, 1, 1),
+      ));
+      await store.upsert(WebDavConnection(
+        id: 'new',
+        label: 'new',
+        baseUrl: 'http://b/dav',
+        lastUsedAt: DateTime(2024, 6, 1),
+      ));
+      expect(store.all().first.id, 'new');
+    });
+
+    test('损坏的 JSON 不会导致崩溃', () async {
+      SharedPreferences.setMockInitialValues({
+        'inkscroll.webdav.connections': 'not json at all',
+      });
+      final prefs = await SharedPreferences.getInstance();
+      final s = WebDavConnectionStore(prefs);
+      expect(s.all(), isEmpty);
+    });
+  });
+
+  group('BookSource · WebDavSource 序列化', () {
+    test('往返一致', () {
+      const src = WebDavSource(
+        connectionId: 'dav_abc',
+        folderUrl: 'http://nas:5005/dav/%E6%BC%AB%E7%94%BB/',
+        folderName: '漫画',
+      );
+      final json = src.toJson();
+      expect(json['type'], 'webdav');
+
+      final back = BookSource.fromJson(json);
+      expect(back, isA<WebDavSource>());
+      final w = back as WebDavSource;
+      expect(w.connectionId, 'dav_abc');
+      expect(w.folderUrl, src.folderUrl);
+      expect(w.folderName, '漫画');
+    });
+  });
+}

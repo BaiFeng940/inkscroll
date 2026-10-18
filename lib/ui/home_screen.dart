@@ -19,6 +19,7 @@ import '../state/app_state.dart';
 import 'image_order_sheet.dart';
 import 'prepare_screen.dart';
 import 'reader/reader_screen.dart';
+import 'webdav_browse_screen.dart';
 
 class HomeScreen extends StatefulWidget {
   const HomeScreen({super.key});
@@ -129,6 +130,16 @@ class _HomeScreenState extends State<HomeScreen> with SingleTickerProviderStateM
           manuallyOrdered: !unchanged,
         );
 
+      case _ImportChoice.webdav:
+        final selection = await showWebDavBrowser(
+          context: context,
+          store: app.webdavConnections,
+        );
+        if (selection == null || !mounted) return;
+        await _runWebDavImport(app, selection);
+        // 网络来源有自己的导入路径，不走下面的本地 pick 流程
+        return;
+
       case _ImportChoice.url:
         final url = await _askForText(
           title: '输入网页链接',
@@ -237,6 +248,32 @@ class _HomeScreenState extends State<HomeScreen> with SingleTickerProviderStateM
     } catch (e) {
       if (!mounted) return;
       _snack('导入失败：$e', isError: true);
+    }
+  }
+
+  /// 从 NAS 导入。
+  ///
+  /// 和本地导入的区别：**没有"准备"阶段**（不需要解压），
+  /// 导入只是列一次目录 + 嗅探少量尺寸，通常一两秒内完成。
+  Future<void> _runWebDavImport(
+    AppState app,
+    WebDavFolderSelection selection,
+  ) async {
+    try {
+      final meta = await app.importWebDav(
+        connection: selection.connection,
+        folderUrl: selection.folderUrl,
+        folderName: selection.folderName,
+      );
+      if (!mounted) return;
+      _snack('已从 NAS 导入：${meta.title}（${meta.pageCount} 页）');
+      await _openBook(meta);
+    } on AppError catch (e) {
+      if (!mounted) return;
+      _snack(e.message, isError: true);
+    } catch (e) {
+      if (!mounted) return;
+      _snack('从 NAS 导入失败：$e', isError: true);
     }
   }
 
@@ -428,11 +465,23 @@ class _HomeScreenState extends State<HomeScreen> with SingleTickerProviderStateM
 
   void _snack(String message, {bool isError = false}) {
     if (!mounted) return;
-    ScaffoldMessenger.of(context).showSnackBar(
+    final messenger = ScaffoldMessenger.of(context);
+    // 错误要"停留够久 + 可手动关"：导入链路的错误信息往往有好几行，
+    // 6 秒一闪而过用户根本来不及读（NAS 导入失败时尤其明显）。
+    messenger.hideCurrentSnackBar();
+    messenger.showSnackBar(
       SnackBar(
         content: Text(message),
         backgroundColor: isError ? Colors.red.shade700 : null,
-        duration: Duration(seconds: isError ? 6 : 3),
+        duration: Duration(seconds: isError ? 12 : 3),
+        behavior: SnackBarBehavior.floating,
+        action: isError
+            ? SnackBarAction(
+                label: '知道了',
+                textColor: Colors.white,
+                onPressed: messenger.hideCurrentSnackBar,
+              )
+            : null,
       ),
     );
   }
@@ -687,12 +736,14 @@ enum _ImportChoice {
   folder,
   archive,
   images,
+  webdav,
   url;
 
   String get title => switch (this) {
         _ImportChoice.folder => '选择文件夹',
         _ImportChoice.archive => '选择压缩包',
         _ImportChoice.images => '选择图片（可多选）',
+        _ImportChoice.webdav => '从 NAS 导入（WebDAV）',
         _ImportChoice.url => '输入网页链接',
       };
 
@@ -700,13 +751,15 @@ enum _ImportChoice {
         _ImportChoice.folder => '文件夹内图片自动成章，文本自动分章分页',
         _ImportChoice.archive => '支持 zip / tar；rar / 7z 需先转换',
         _ImportChoice.images => '直接按选择顺序生成一本漫画',
-        _ImportChoice.url => '抓取网页正文（需要接入 dio + html，见代码注释）',
+        _ImportChoice.webdav => '飞牛 / 群晖 / 威联通 / Alist，联机阅读，按需下载',
+        _ImportChoice.url => '抓取网页正文（需要接入 html 解析，见代码注释）',
       };
 
   IconData get icon => switch (this) {
         _ImportChoice.folder => Icons.folder_open,
         _ImportChoice.archive => Icons.archive_outlined,
         _ImportChoice.images => Icons.image_outlined,
+        _ImportChoice.webdav => Icons.dns_outlined,
         _ImportChoice.url => Icons.link,
       };
 }

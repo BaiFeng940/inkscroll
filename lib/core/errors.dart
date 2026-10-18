@@ -102,3 +102,69 @@ final class Rar7zNotImplementedError extends AppError {
         );
   final String format;
 }
+
+// ---------------------------------------------------------------------------
+// 网络（WebDAV / NAS）
+// ---------------------------------------------------------------------------
+
+/// 连不上服务器：地址写错、端口没开、不在同一网络、防火墙拦截……
+final class NetworkUnreachableError extends AppError {
+  const NetworkUnreachableError({String? address, String? detail})
+      : super(
+          '连接不上服务器。\n'
+          '请检查：地址和端口是否正确、NAS 是否开机、'
+          '手机和 NAS 是否在同一个局域网、WebDAV 服务是否已开启。',
+          technicalDetail: '${address ?? ''} $detail',
+          action: ErrorAction.retry,
+        );
+}
+
+/// 认证失败
+final class NetworkAuthError extends AppError {
+  const NetworkAuthError({String? detail})
+      : super(
+          '用户名或密码不正确。\n'
+          '请确认是 NAS 的 WebDAV 账号（不一定与登录 NAS 网页的账号相同）。',
+          technicalDetail: detail,
+          action: ErrorAction.enterPassword,
+        );
+}
+
+/// 服务器返回了非预期状态码
+final class NetworkHttpError extends AppError {
+  const NetworkHttpError(this.statusCode, {String? path, String? detail})
+      : super(
+          '服务器返回错误（HTTP $statusCode）。\n'
+          '常见原因：路径不存在（404）、没有访问权限（403）、'
+          '或该地址不是 WebDAV 服务（200 但内容不是文件列表）。',
+          technicalDetail: 'HTTP $statusCode ${path ?? ''} $detail',
+          action: ErrorAction.none,
+        );
+  final int statusCode;
+}
+
+/// 返回的内容不是 WebDAV 的多状态响应 —— 多半是地址填成了网页地址
+final class NotWebDavError extends AppError {
+  const NotWebDavError({String? detail})
+      : super(
+          '这个地址看起来不是 WebDAV 服务。\n'
+          '你填的可能是 NAS 的网页管理地址。\n'
+          '请在飞牛 OS 里开启「文件服务 → WebDAV」，'
+          '然后填写形如 http://192.168.1.10:5005/dav 的地址。',
+          technicalDetail: detail,
+          action: ErrorAction.retry,
+        );
+}
+
+/// TLS 证书校验失败（自签证书的 NAS 非常常见）
+final class NetworkCertificateError extends AppError {
+  const NetworkCertificateError({String? detail})
+      : super(
+          'HTTPS 证书校验失败。\n'
+          '家用 NAS 通常使用自签证书。你可以：\n'
+          '· 改用 http:// 地址（局域网内可以接受）；或\n'
+          '· 在下方打开「允许自签名证书」。',
+          technicalDetail: detail,
+          action: ErrorAction.retry,
+        );
+}
