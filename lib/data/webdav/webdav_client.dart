@@ -124,12 +124,15 @@ class WebDavClient {  WebDavClient({
   ///   · 连接被拒 / 被重置 / TLS 失败 → 才换下一个 scheme。
   ///
   /// 这样"密码错"不会被误报成"连接不上"——这正是之前踩的坑。
+  ///
+  /// 超时给 15 秒（原来 8 秒）：外网访问时一次 TLS 握手 + 鉴权往返
+  /// 在移动网络下经常要好几秒，8 秒会误杀。
   static Future<WebDavBaseProbe> resolveBaseUrl({
     required String input,
     String? username,
     String? password,
     bool allowSelfSigned = false,
-    Duration timeout = const Duration(seconds: 8),
+    Duration timeout = const Duration(seconds: 15),
     http.Client? httpClient,
   }) async {
     final raw = input.trim();
