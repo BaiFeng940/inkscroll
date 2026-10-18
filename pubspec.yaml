@@ -1,7 +1,7 @@
 name: inkscroll
 description: "inkScroll — Flutter 漫画/文档阅读器：压缩包按需解压、虚拟长页、高刷新率适配。"
 publish_to: 'none'
-version: 0.3.1+4
+version: 0.3.2+5
 
 environment:
   # 本机实测：Flutter 3.47.7 / Dart 3.13.5
