@@ -231,13 +231,27 @@ class WebDavClient {  WebDavClient({
     return h;
   }
 
+  /// 同一个主机最多同时开几条连接。
+  ///
+  /// 太小会让"并行扫描"退回串行（请求排队等连接），
+  /// 太大又会打爆家用 NAS 的弱 CPU / 家用上行带宽。
+  /// 6 是实测比较平衡的值：扫描 5 路 + 嗅探 6 路都能跑满。
+  static const int maxConnectionsPerHost = 6;
+
   http.Client _buildClient() {
-    if (!allowSelfSigned) return http.Client();
-    // 自签证书：构造一个跳过证书校验的 HttpClient。
-    // 只在用户显式打开开关时启用，且界面上有明确的风险提示。
+    // ★ 不管是否自签，都走自建 HttpClient ——
+    //   默认的 `http.Client()` 无法设置 maxConnectionsPerHost 和超时，
+    //   而这两个恰恰是并行扫描/嗅探能不能真正并行的前提。
     final io = HttpClient()
       ..connectionTimeout = _timeout
-      ..badCertificateCallback = (cert, host, port) => true;
+      ..maxConnectionsPerHost = maxConnectionsPerHost
+      // 复用长连接：一次导入几十本书、翻页几十张图，
+      // 每次重新握手会白白多花大量往返。
+      ..idleTimeout = const Duration(seconds: 15);
+    if (allowSelfSigned) {
+      // 自签证书：只在用户显式打开开关时跳过校验，界面有明确风险提示。
+      io.badCertificateCallback = (cert, host, port) => true;
+    }
     return IOClient(io);
   }
 

@@ -19,6 +19,7 @@ import 'package:http/http.dart' as http;
 import 'package:http/testing.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import 'package:inkscroll/core/errors.dart';
+import 'package:inkscroll/data/prefs_store.dart';
 import 'package:inkscroll/data/webdav/webdav_client.dart';
 import 'package:inkscroll/data/models/book_meta.dart';
 import 'package:inkscroll/data/webdav/webdav_connection.dart';
@@ -473,6 +474,43 @@ void main() {
       final prefs = await SharedPreferences.getInstance();
       final s = WebDavConnectionStore(prefs);
       expect(s.all(), isEmpty);
+    });
+  });
+
+  group('PrefsStore · 批量写入书架', () {
+    test('upsertBooks 一次写入多本，且不重复', () async {
+      SharedPreferences.setMockInitialValues({});
+      final prefs = await SharedPreferences.getInstance();
+      final store = await PrefsStore.open();
+
+      BookMeta makeBook(String id) => BookMeta(
+            id: id,
+            title: '书 $id',
+            kind: BookKind.comic,
+            source: WebDavSource(
+              connectionId: 'c1',
+              folderUrl: 'http://nas/dav/$id/',
+              folderName: 'x',
+            ),
+            pageCount: 3,
+            chapterCount: 1,
+            importedAt: DateTime(2026, 1, 1),
+          );
+      // 避免 analyzer 报未使用
+      expect(prefs, isNotNull);
+
+      await store.upsertBooks([makeBook('a'), makeBook('b')]);
+      expect(store.loadBooks().length, 2);
+
+      // 再写一次同样的 id（模拟重复导入）不应变成 4 本
+      await store.upsertBooks([makeBook('a'), makeBook('b')]);
+      expect(store.loadBooks().length, 2);
+
+      // 新增 + 更新混合
+      await store.upsertBooks([makeBook('c'), makeBook('a')]);
+      final books = store.loadBooks();
+      expect(books.length, 3);
+      expect(books.where((b) => b.id == 'a').length, 1);
     });
   });
 

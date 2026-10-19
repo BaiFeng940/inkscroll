@@ -56,10 +56,23 @@ class WebDavFolderImporter implements Importer {
   /// 识别/构建时用的连接；不传则从 [buildDocument] 的参数取
   final WebDavConnection? connection;
   /// 最多嗅探多少张图的真实尺寸（其余用中位数估算）
-  static const int sniffSamples = 16;
+  ///
+  /// ★ 从 16 降到 4：同一个漫画文件夹里的图几乎总是同一个尺寸，
+  /// 16 次 Range 请求换来的精度提升微乎其微，代价却是每本书多十几倍
+  /// 的往返。实测大库（100 本）导入时，这一项就能省下几十秒。
+  static const int sniffSamples = 4;
 
-  /// 同时进行的 Range 嗅探并发数 —— 太高会打爆家用 NAS 的弱 CPU
-  static const int sniffConcurrency = 4;
+  /// 同时进行的 Range 嗅探并发数。
+  ///
+  /// 从 4 提到 6：现在总数只有 4 个样本，一轮就发完；
+  /// 稍微放大并发能让慢速链路上更快收齐。
+  static const int sniffConcurrency = 6;
+
+  /// 扫描子目录时的并行度。
+  ///
+  /// 原来是一个接一个 PROPFIND —— 走公网隧道时 RTT 有几十到几百毫秒，
+  /// 100 个文件夹就是纯等几十秒。并行 5 路能把这部分压到 1/5。
+  static const int scanConcurrency = 5;
 
   /// 递归列目录的最大深度（漫画一般就是一层，留点余量）
   static const int maxDepth = 3;
@@ -320,24 +333,42 @@ class WebDavFolderImporter implements Importer {
         ? subdirs.sublist(0, maxScannedFolders)
         : subdirs;
 
+    // ── 并行扫描子目录 ──
+    //
+    // 原来是 `for + await client.list()` 逐个串行。走公网隧道时单次
+    // PROPFIND 的往返就有几十到几百毫秒，100 个文件夹光等就几十秒。
+    // 这里用固定大小的 worker 池并发，结果按**原始顺序**放回数组，
+    // 保证导入顺序和目录名自然序一致（并发完成顺序不可控）。
+    final slots = List<WebDavComicCandidate?>.filled(scanTargets.length, null);
+    var next = 0;
     var done = 0;
-    for (final dir in scanTargets) {
-      done++;
-      onProgress?.call(done, scanTargets.length, dir.name);
-      try {
-        final entries = await client.list(dir.url);
-        final images = _collectImages(entries, client, dir.url);
-        if (images.isNotEmpty) {
-          out.add(WebDavComicCandidate(
-            url: dir.url,
-            name: dir.name,
-            images: images,
-          ));
+
+    Future<void> worker() async {
+      while (true) {
+        final i = next++;
+        if (i >= scanTargets.length) return;
+        final dir = scanTargets[i];
+        try {
+          final entries = await client.list(dir.url);
+          final images = _collectImages(entries, client, dir.url);
+          if (images.isNotEmpty) {
+            slots[i] = WebDavComicCandidate(
+              url: dir.url,
+              name: dir.name,
+              images: images,
+            );
+          }
+        } catch (_) {
+          // 单个子目录读失败（权限 / 已删除）不影响其他
         }
-      } catch (_) {
-        // 单个子目录读失败（权限 / 已删除）不影响其他
+        done++;
+        onProgress?.call(done, scanTargets.length, dir.name);
       }
     }
+
+    final workers = math.min(scanConcurrency, math.max(1, scanTargets.length));
+    await Future.wait(List.generate(workers, (_) => worker()));
+    out.addAll(slots.whereType<WebDavComicCandidate>());
 
     return out;
   }
@@ -349,22 +380,28 @@ class WebDavFolderImporter implements Importer {
   }
 
   /// 把单个候选目录构建成 Document（供批量导入直接调用）
+  ///
+  /// [client] 可选：批量导入时由调用方传一个**共享**的 client，
+  /// 避免每本书都新建一条 TCP + TLS 连接。走公网隧道时一次握手
+  /// 可能要几百毫秒，100 本书就是几十秒的纯等待。
   static Future<Document> buildFromCandidate({
     required WebDavConnection connection,
     required WebDavComicCandidate candidate,
+    WebDavClient? client,
   }) async {
-    final client = connection.createClient();
+    final owned = client == null;
+    final c = client ?? connection.createClient();
     try {
       return await _build(
         ctx: null,
-        client: client,
+        client: c,
         conn: connection,
         folderUrl: candidate.url,
         folderName: candidate.name,
         images: candidate.images,
       );
     } finally {
-      client.close();
+      if (owned) c.close();
     }
   }
 }

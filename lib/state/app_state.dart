@@ -137,72 +137,116 @@ class AppState extends ChangeNotifier {
           onScanProgress?.call(done, total, name);
         },
       );
-    } finally {
-      client.close();
-    }
 
-    if (candidates.isEmpty) {
-      _setProgress(null, '');
-      return WebDavLibraryResult(
-        scanned: 0,
-        imported: 0,
-        failures: const [],
-        emptyFolder: folderName,
-      );
-    }
-
-    final imported = <BookMeta>[];
-    final failures = <String>[];
-
-    // 整批期间不生成封面，结束后统一在后台补（见 _scheduleCover 注释）
-    _deferCovers = true;
-    try {
-      for (var i = 0; i < candidates.length; i++) {
-        final c = candidates[i];
-        final label = '${c.name}（${c.pageCount} 页）';
-        _setProgress(
-          0.4 + 0.6 * (i / candidates.length),
-          '正在导入 ${i + 1}/${candidates.length}：$label',
+      if (candidates.isEmpty) {
+        _setProgress(null, '');
+        return WebDavLibraryResult(
+          scanned: 0,
+          imported: 0,
+          failures: const [],
+          emptyFolder: folderName,
         );
-        onImportProgress?.call(i + 1, candidates.length, label);
+      }
 
-        try {
-          // 直接建 Document，跳过单本导入的重复扫描
-          final doc = await WebDavFolderImporter.buildFromCandidate(
-            connection: connection,
-            candidate: c,
-          );
-          final pick = SourcePick(
-            kind: SourcePickKind.webdav,
-            displayName: c.name,
-            sourceId: ByteStore.newBookId(),
-            uri: Uri.tryParse(c.url),
-            webdavConnectionId: connection.id,
-            webdavFolderUrl: c.url,
-            webdavFolderName: c.name,
-          );
-          final book = await _persist(pick, doc);
-          imported.add(book);
-        } catch (e) {
-          failures.add('${c.name}: $e');
+      // ── 去重：已经导入过的目录直接跳过 ──
+      //
+      // 之前重复点「添加为库」会把同一个目录再导一遍，产生一堆重复的书，
+      // 用户还以为是加载慢。按 (连接, 目录地址) 判重。
+      final existing = <String>{
+        for (final b in books)
+          if (b.source case WebDavSource(:final connectionId, :final folderUrl))
+            '$connectionId|${folderUrl.replaceAll(RegExp(r'/+$'), '').toLowerCase()}',
+      };
+      String keyOf(String connId, String url) =>
+          '$connId|${url.replaceAll(RegExp(r'/+$'), '').toLowerCase()}';
+
+      final fresh = <WebDavComicCandidate>[];
+      var skipped = 0;
+      for (final c in candidates) {
+        if (existing.contains(keyOf(connection.id, c.url))) {
+          skipped++;
+        } else {
+          fresh.add(c);
         }
       }
+
+      if (fresh.isEmpty) {
+        _setProgress(null, '');
+        return WebDavLibraryResult(
+          scanned: candidates.length,
+          imported: 0,
+          failures: const [],
+          allAlreadyAdded: true,
+          skipped: skipped,
+        );
+      }
+
+      final imported = <BookMeta>[];
+      final failures = <String>[];
+      final pending = <BookMeta>[];
+
+      // 整批期间不生成封面，结束后统一在后台补（见 _scheduleCover 注释）
+      _deferCovers = true;
+      try {
+        for (var i = 0; i < fresh.length; i++) {
+          final c = fresh[i];
+          final label = '${c.name}（${c.pageCount} 页）';
+          _setProgress(
+            0.4 + 0.6 * (i / fresh.length),
+            '正在导入 ${i + 1}/${fresh.length}：$label',
+          );
+          onImportProgress?.call(i + 1, fresh.length, label);
+
+          try {
+            // 直接建 Document，跳过单本导入的重复扫描。
+            // ★ 复用同一条连接：每本新建 client 都要重做一次 TCP+TLS
+            //   握手，走公网隧道时 100 本书能白白多花几十秒。
+            final doc = await WebDavFolderImporter.buildFromCandidate(
+              connection: connection,
+              candidate: c,
+              client: client,
+            );
+            final pick = SourcePick(
+              kind: SourcePickKind.webdav,
+              displayName: c.name,
+              sourceId: ByteStore.newBookId(),
+              uri: Uri.tryParse(c.url),
+              webdavConnectionId: connection.id,
+              webdavFolderUrl: c.url,
+              webdavFolderName: c.name,
+            );
+            // batch 模式：先攒着，整批结束一次性写盘
+            final book = await _persist(pick, doc, batch: pending);
+            imported.add(book);
+          } catch (e) {
+            failures.add('${c.name}: $e');
+          }
+        }
+      } finally {
+        _deferCovers = false;
+
+        // ★ 一次写盘 + 一次刷新。逐本 upsertBook + notifyListeners
+        //   在大库上是 O(n²) 的 JSON 编解码，导入后半段会明显卡。
+        if (pending.isNotEmpty) {
+          await _prefs.upsertBooks(pending);
+        }
+        books = _prefs.loadBooks();
+        notifyListeners();
+
+        // 整批结束后在后台顺序补封面（只补可见的，见 ensureAllCovers 注释）
+        ensureAllCovers();
+      }
+
+      return WebDavLibraryResult(
+        scanned: candidates.length,
+        imported: imported.length,
+        failures: failures,
+        skipped: skipped,
+      );
     } finally {
-      _deferCovers = false;
-      // 整批结束后在后台顺序补封面，用户回到书架时它们会逐个出现
-      ensureAllCovers();
+      // 整条连接在批量导入全程复用，最后统一关闭
+      client.close();
     }
-
-    await webdavConnections.touch(connection.id);
-    books = _prefs.loadBooks();
-    _setProgress(null, '');
-    notifyListeners();
-
-    return WebDavLibraryResult(
-      scanned: candidates.length,
-      imported: imported.length,
-      failures: failures,
-    );
   }
 
   // ------------------------------------------------------------------
@@ -374,7 +418,16 @@ class AppState extends ChangeNotifier {
     }
   }
 
-  Future<BookMeta> _persist(SourcePick pick, Document doc) async {
+  /// 持久化一本书。
+  ///
+  /// [batch] 非空时表示"正在批量导入"：只把元数据追加到该列表，
+  /// 由调用方在整批结束后一次性写盘并刷新 UI —— 逐本写盘 + 逐本
+  /// notifyListeners 会让大库导入越到后面越卡。
+  Future<BookMeta> _persist(
+    SourcePick pick,
+    Document doc, {
+    List<BookMeta>? batch,
+  }) async {
     final bookId = pick.sourceId;
 
     // ★ 把算好的 Document 落盘：下次打开就是一次 JSON 解析（秒开），
@@ -398,13 +451,14 @@ class AppState extends ChangeNotifier {
       description: doc.warnings.isEmpty ? null : doc.warnings.join('\n'),
     );
 
+    if (batch != null) {
+      batch.add(meta);
+      return meta;
+    }
+
     await _prefs.upsertBook(meta);
     books = _prefs.loadBooks();
     notifyListeners();
-
-    // 封面取自第一张图片。**不 await** —— 在线库的书要拉一页网络数据，
-    // 不能让它拖慢导入（批量导入几十本时尤其明显）。
-    _scheduleCover(meta);
     return meta;
   }
 
@@ -415,15 +469,6 @@ class AppState extends ChangeNotifier {
   /// 队列：待生成封面的书 id
   final Set<String> _coverQueue = <String>{};
   bool _coverWorkerRunning = false;
-
-  void _scheduleCover(BookMeta book) {
-    // 批量导入期间先攒着，等整批结束再统一生成 ——
-    // 否则每存一本书就插一次网络请求，会把导入本身拖慢好几倍。
-    if (_deferCovers) return;
-    if (book.coverPath != null && File(book.coverPath!).existsSync()) return;
-    _coverQueue.add(book.id);
-    unawaited(_drainCovers());
-  }
 
   /// 批量导入期间推迟封面生成
   bool _deferCovers = false;
@@ -459,6 +504,18 @@ class AppState extends ChangeNotifier {
 
   /// 确保这本书有封面（取自第一张图片），生成后落盘并刷新书架。
   ///
+  /// 这是**按需**入口：书架的卡片可见时才会调用。
+  /// 在线库的书要为此下载一页完整图片，所以绝不能一次性给全库排队
+  /// （几百本 = 几百次整图下载，表现就是"打开 App 卡半天"）。
+  void requestCover(BookMeta book) {
+    if (book.coverPath != null && File(book.coverPath!).existsSync()) return;
+    _coverQueue.add(book.id);
+    // 批量导入期间只入队不执行 —— 否则每本插一次整图下载，
+    // 导入本身会慢好几倍。整批结束后由 ensureAllCovers 统一放行。
+    if (_deferCovers) return;
+    unawaited(_drainCovers());
+  }
+  ///
   /// 任何失败都**静默忽略** —— 封面只是锦上添花，
   /// 不能因为某本书第一页读不出来就影响书架显示或导入结果。
   Future<void> ensureCover(BookMeta book) async {
@@ -486,11 +543,20 @@ class AppState extends ChangeNotifier {
     }
   }
 
-  /// 为所有还缺封面的书排一次队（启动时调用，补齐历史数据）。
+  /// 曾经在启动时给整个书架排队补封面，已废除。
+  ///
+  /// 在线库的书生成封面要**下载一整张原图**。几百本的书架就是几百次
+  /// 整图下载，用户感知是"打开 App 卡半天"，比没有封面糟糕得多。
+  /// 现在改为由书架卡片在**可见时**调用 [requestCover] 按需触发。
   void ensureAllCovers() {
+    // 现在也仍然有用：只补**本地库**的（读本地文件，代价很低），
+    // 在线库的交给可见性触发。
     for (final b in books) {
-      _scheduleCover(b);
+      if (b.coverPath != null && File(b.coverPath!).existsSync()) continue;
+      if (isOnline(b)) continue;
+      _coverQueue.add(b.id);
     }
+    unawaited(_drainCovers());
   }
 
   BookSource _sourceFor(SourcePick pick) {
@@ -838,6 +904,8 @@ class WebDavLibraryResult {
     required this.imported,
     required this.failures,
     this.emptyFolder,
+    this.skipped = 0,
+    this.allAlreadyAdded = false,
   });
 
   /// 扫描到多少个含图片的文件夹
@@ -851,6 +919,12 @@ class WebDavLibraryResult {
 
   /// 非空表示"扫描到 0 个目录"，值是用户选的那个文件夹名
   final String? emptyFolder;
+
+  /// 因为"已经在库里"而跳过的数量
+  final int skipped;
+
+  /// 扫到的全部都已经在库里了（不是空目录，也不是失败）
+  final bool allAlreadyAdded;
 
   bool get isEmpty => scanned == 0;
 }

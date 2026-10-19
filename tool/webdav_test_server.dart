@@ -22,14 +22,30 @@
 /// 注意：这只是测试夹具，**没有做任何安全加固**，别拿去暴露在公网。
 library;
 
+import 'dart:async';
 import 'dart:convert';
 import 'dart:io';
 
 Future<void> main(List<String> args) async {
   if (args.isEmpty) {
     stderr.writeln(
-      '用法: dart run tool/webdav_test_server.dart <目录> [端口] [用户名] [密码]',
+      '用法: dart run tool/webdav_test_server.dart <目录> [端口] [用户名] [密码] [--delay-ms=NN]',
     );
+    exitCode = 64;
+    return;
+  }
+
+  // `--delay-ms=NN`：给每个请求加固定延迟，模拟公网 / 隧道的 RTT。
+  // 本地回环 RTT≈0，"串行 vs 并行"的差距测不出来，加延迟才能真实反映。
+  final delayArg =
+      args.firstWhere((a) => a.startsWith('--delay-ms='), orElse: () => '');
+  if (delayArg.isNotEmpty) {
+    final ms = int.tryParse(delayArg.split('=').last) ?? 0;
+    _simulatedDelay = Duration(milliseconds: ms.clamp(0, 5000));
+  }
+  args = args.where((a) => !a.startsWith('--')).toList();
+  if (args.isEmpty) {
+    stderr.writeln('缺少根目录参数');
     exitCode = 64;
     return;
   }
@@ -58,17 +74,41 @@ Future<void> main(List<String> args) async {
   stdout.writeln('Ctrl+C 停止');
 
   await for (final req in server) {
-    try {
-      await _handle(req, root, user, pass);
-    } catch (e) {
-      stderr.writeln('处理 ${req.method} ${req.uri} 失败: $e');
-      try {
-        req.response.statusCode = 500;
-        await req.response.close();
-      } catch (_) {}
-    }
+    // ★ 必须**并发**处理每个请求。
+    //
+    // 之前是 `await _handle(...)` 直接写在 accept 循环里 —— 整个服务器
+    // 变成串行的，一次只处理一个请求。这会让客户端的并行扫描**完全失效**，
+    // 用它跑性能基准会得出"并行没有用"的错误结论（实测踩到过：
+    // 40 个目录并行 5 路只快了 1.12x，全被服务器串行吃掉了）。
+    // 真实的 NAS / HTTP 服务器都是并发的，夹具也必须如此。
+    unawaited(_serve(req, root, user, pass));
   }
 }
+
+Future<void> _serve(
+  HttpRequest req,
+  Directory root,
+  String? user,
+  String? pass,
+) async {
+  try {
+    // 模拟公网往返延迟：本地回环的 RTT 接近 0，测不出"串行 vs 并行"
+    // 的差别。加一个固定延迟才能真实反映走隧道/公网时的行为。
+    if (_simulatedDelay > Duration.zero) {
+      await Future<void>.delayed(_simulatedDelay);
+    }
+    await _handle(req, root, user, pass);
+  } catch (e) {
+    stderr.writeln('处理 ${req.method} ${req.uri} 失败: $e');
+    try {
+      req.response.statusCode = 500;
+      await req.response.close();
+    } catch (_) {}
+  }
+}
+
+/// 每个请求额外延迟多少（由 `--delay-ms=NN` 指定，默认 0）
+Duration _simulatedDelay = Duration.zero;
 
 Future<void> _handle(
   HttpRequest req,
