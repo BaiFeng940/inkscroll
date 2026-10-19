@@ -108,8 +108,8 @@ Future<void> main(List<String> args) async {
 
   stdout.writeln('');
   stdout.writeln('=== 扫描阶段（${subdirs.length} 个子目录）===');
-  stdout.writeln('  旧（串行，每本新建连接） : ${oldScanMs} ms  发现 ${oldBooks.length} 本');
-  stdout.writeln('  新（并行 5 路，复用连接） : ${newScanMs} ms  发现 ${newBooks.length} 本');
+  stdout.writeln('  旧（串行，每本新建连接） : $oldScanMs ms  发现 ${oldBooks.length} 本');
+  stdout.writeln('  新（并行 5 路，复用连接） : $newScanMs ms  发现 ${newBooks.length} 本');
   if (newScanMs > 0) {
     stdout.writeln('  加速: ${(oldScanMs / newScanMs).toStringAsFixed(2)}x');
   }
@@ -156,8 +156,8 @@ Future<void> main(List<String> args) async {
 
   stdout.writeln('');
   stdout.writeln('=== 单本尺寸嗅探 ===');
-  stdout.writeln('  旧（16 样本 / 并发 4） : ${oldSniffMs} ms');
-  stdout.writeln('  新（4 样本 / 并发 6）  : ${newSniffMs} ms');
+  stdout.writeln('  旧（16 样本 / 并发 4） : $oldSniffMs ms');
+  stdout.writeln('  新（4 样本 / 并发 6）  : $newSniffMs ms');
   if (newSniffMs > 0) {
     stdout.writeln('  加速: ${(oldSniffMs / newSniffMs).toStringAsFixed(2)}x');
   }

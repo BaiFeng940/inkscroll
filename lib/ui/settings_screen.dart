@@ -73,7 +73,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
                     text: '每个含图片的子文件夹',
                     style: TextStyle(fontWeight: FontWeight.w700),
                   ),
-                  TextSpan(text: '都会成为在线库里的一本书。'),
+                  TextSpan(text: '都会成为在线库里的一本书；目录里的 zip/cbz 压缩包也算一本。'),
                 ],
               ),
             ),
@@ -136,7 +136,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
           const ListTile(
             leading: Icon(Icons.info_outline),
             title: Text('inkScroll'),
-            subtitle: Text('版本 0.3.6 · 本地与网盘漫画阅读器\n'
+            subtitle: Text('版本 0.3.7 · 本地与网盘漫画阅读器\n'
                 '不收集任何数据；只有你主动连接网盘时才有网络请求'),
             isThreeLine: true,
           ),

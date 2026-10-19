@@ -74,6 +74,34 @@ final class WebDavRef extends ContentRef {
   String toString() => 'WebDavRef($connectionId :: $url)';
 }
 
+/// **网盘上的压缩包里的一个条目**
+///
+/// 为什么不能复用 [ArchiveEntryRef]：那个假定压缩包在本地磁盘上
+/// （`archivePath`），而这里的包在网盘上，要靠 Range 请求按需读取。
+///
+/// 只记录"哪个包里的哪个条目" —— 条目在包内的偏移、压缩方式、
+/// 压缩后大小都由 `ZipArchiveSource` 现场解析（读中央目录通常只要
+/// 1~2 次 Range 请求），不需要落到模型里，避免模型与包内容不一致。
+final class WebDavArchiveRef extends ContentRef {
+  const WebDavArchiveRef({
+    required this.connectionId,
+    required this.archiveUrl,
+    required this.entryPath,
+  });
+
+  final String connectionId;
+
+  /// 压缩包本身的**绝对且已编码** URL
+  final String archiveUrl;
+
+  /// 包内路径（例如 `第01话/001.jpg`）
+  final String entryPath;
+
+  @override
+  String toString() =>
+      'WebDavArchiveRef($connectionId :: $archiveUrl!$entryPath)';
+}
+
 // ---------------------------------------------------------------------------
 // 页内容
 // ---------------------------------------------------------------------------

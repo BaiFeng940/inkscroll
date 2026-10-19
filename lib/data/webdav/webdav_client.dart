@@ -27,6 +27,7 @@ library;
 
 import 'dart:async';
 import 'dart:convert';
+import 'dart:math' as math;
 import 'dart:io';
 import 'dart:typed_data';
 
@@ -539,6 +540,77 @@ class WebDavClient {  WebDavClient({
       final b = resp.bodyBytes;
       return b.length <= maxBytes ? b : Uint8List.sublistView(b, 0, maxBytes);
     }
+    _throwIfBadStatus(resp, url);
+    return resp.bodyBytes;
+  }
+
+  /// 读取远端文件的字节数（`PROPFIND` Depth:0 的 `getcontentlength`）。
+  ///
+  /// 网盘上的压缩包要靠它拿到总长度才能定位 EOCD。
+  /// 拿不到时抛 [NotWebDavError] —— 宁可明确失败，也不要猜一个长度
+  /// 去读偏移（会读到垃圾数据，报出完全无关的 ZIP 错误）。
+  Future<int> contentLength(String url) async {
+    http.Response resp;
+    try {
+      final req = http.Request('PROPFIND', Uri.parse(url))
+        ..headers.addAll(_authHeaders)
+        ..headers['Depth'] = '0';
+      final streamed = await _client.send(req).timeout(_timeout);
+      resp = await http.Response.fromStream(streamed).timeout(_timeout);
+    } on HandshakeException catch (e) {
+      throw NetworkCertificateError(detail: '$e');
+    } on TimeoutException catch (e) {
+      throw NetworkUnreachableError(address: url, detail: 'timeout: $e');
+    } on SocketException catch (e) {
+      throw NetworkUnreachableError(address: url, detail: '$e');
+    } on http.ClientException catch (e) {
+      throw NetworkUnreachableError(address: url, detail: e.message);
+    } catch (e) {
+      throw NetworkUnreachableError(address: url, detail: '$e');
+    }
+
+    _throwIfBadStatus(resp, url);
+    final body = utf8.decode(resp.bodyBytes, allowMalformed: true);
+    // 服务端的命名空间前缀五花八门，按 local name 抓更稳
+    final m = RegExp(
+      r'<(?:[A-Za-z0-9_.-]+:)?getcontentlength[^>]*>\s*(\d+)\s*<',
+      caseSensitive: false,
+    ).firstMatch(body);
+    final len = m == null ? null : int.tryParse(m.group(1)!);
+    if (len == null) {
+      throw NotWebDavError(detail: 'PROPFIND 没有返回 getcontentlength: $url');
+    }
+    return len;
+  }
+
+  /// 读取 `[offset, offset+length)` 这一段字节。
+  ///
+  /// 与 [getRange]（只取开头）不同，这里是真的任意偏移 ——
+  /// 网盘压缩包的中央目录、单个条目数据都靠它。
+  ///
+  /// ## 商用网盘的 302 重定向
+  ///
+  /// 实测 123云盘：`GET` 先返回 `302` 跳到 CDN 签名地址。
+  /// `package:http` 默认跟随重定向，且会把 `Range` 头带过去，
+  /// 所以这里最终拿到的是 CDN 的 `206`。已用真实数据验证字节正确。
+  Future<Uint8List> getRangeAt(String url, int offset, int length) async {
+    if (length <= 0) return Uint8List(0);
+    final end = offset + length - 1;
+    final resp = await _sendGet(url, range: 'bytes=$offset-$end');
+
+    if (resp.statusCode == 206) return resp.bodyBytes;
+
+    if (resp.statusCode >= 200 && resp.statusCode < 300) {
+      // 服务器忽略了 Range，回了全量：切出我们要的那一段
+      final b = resp.bodyBytes;
+      if (offset >= b.length) return Uint8List(0);
+      final stop = math.min(offset + length, b.length);
+      return Uint8List.sublistView(b, offset, stop);
+    }
+
+    // 416：要的范围超出文件尾。ZIP 解析器允许这种情况，返回空即可
+    if (resp.statusCode == 416) return Uint8List(0);
+
     _throwIfBadStatus(resp, url);
     return resp.bodyBytes;
   }

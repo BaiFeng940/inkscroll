@@ -23,6 +23,13 @@ sealed class BookSource {
           folderUrl: json['folderUrl'] as String? ?? '',
           folderName: json['folderName'] as String? ?? '',
         );
+      case 'webdavArchive':
+        return WebDavArchiveSource(
+          connectionId: json['connectionId'] as String? ?? '',
+          archiveUrl: json['archiveUrl'] as String? ?? '',
+          archiveName: json['archiveName'] as String? ?? '',
+          archiveSize: json['archiveSize'] as int?,
+        );
       case 'archive':
       default:
         return ArchiveSourceSpec(
@@ -90,6 +97,42 @@ final class WebDavSource extends BookSource {
         'connectionId': connectionId,
         'folderUrl': folderUrl,
         'folderName': folderName,
+      };
+}
+
+/// 网络（WebDAV / NAS）上的一个**压缩包**
+///
+/// 和 [WebDavSource]（一个文件夹）并列：商用网盘上的漫画常常是
+/// 一话一个 zip，那么"一本书 = 一个包"。
+///
+/// 阅读时靠 HTTP Range 只读中央目录 + 当前页的压缩数据，
+/// **不会下载整个压缩包**。
+final class WebDavArchiveSource extends BookSource {
+  const WebDavArchiveSource({
+    required this.connectionId,
+    required this.archiveUrl,
+    required this.archiveName,
+    this.archiveSize,
+  });
+
+  final String connectionId;
+
+  /// 压缩包的绝对 URL（已编码）
+  final String archiveUrl;
+
+  /// 压缩包显示名（书籍标题的来源）
+  final String archiveName;
+
+  /// 包总字节数（目录列表里就有，省一次 PROPFIND）
+  final int? archiveSize;
+
+  @override
+  Map<String, dynamic> toJson() => {
+        'type': 'webdavArchive',
+        'connectionId': connectionId,
+        'archiveUrl': archiveUrl,
+        'archiveName': archiveName,
+        if (archiveSize != null) 'archiveSize': archiveSize,
       };
 }
 

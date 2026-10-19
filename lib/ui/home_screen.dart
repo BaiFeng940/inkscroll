@@ -387,7 +387,7 @@ class _HomeScreenState extends State<HomeScreen> with SingleTickerProviderStateM
                   emptyHint: '在线库还是空的。\n'
                       '点右上角「设置」→ 添加 WebDAV 库，\n'
                       '连上网盘后选一个漫画根目录，\n'
-                      '它下面每个含图片的子文件夹都会变成一本书。',
+                      '它下面每个含图片的子文件夹、每个压缩包都会变成一本书。',
                   emptyAction: TextButton.icon(
                     icon: const Icon(Icons.settings_outlined, size: 18),
                     label: const Text('去设置里添加'),

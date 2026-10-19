@@ -27,12 +27,14 @@ import '../data/webdav/webdav_connection.dart';
 import '../importers/import_utils.dart';
 import '../reader/document.dart';
 
-/// 扫描结果：一个"含图片的文件夹"，对应一本书
+/// 扫描结果：一本书。可能是"含图片的文件夹"，也可能是**一个压缩包**。
 class WebDavComicCandidate {
   const WebDavComicCandidate({
     required this.url,
     required this.name,
     required this.images,
+    this.isArchive = false,
+    this.archiveSize,
   });
 
   /// 文件夹的绝对 URL
@@ -44,10 +46,18 @@ class WebDavComicCandidate {
   /// 该目录下的图片条目（已按自然序排好）
   final List<WebDavEntry> images;
 
-  int get pageCount => images.length;
+  /// true = 这一项其实是**一个压缩包**（一本书 = 一个包）
+  final bool isArchive;
+
+  /// 压缩包字节数（目录列表里就有）
+  final int? archiveSize;
+
+  int get pageCount => isArchive ? 0 : images.length;
 
   @override
-  String toString() => 'WebDavComicCandidate($name, ${images.length} 张)';
+  String toString() => isArchive
+      ? 'WebDavComicCandidate($name, 压缩包)'
+      : 'WebDavComicCandidate($name, ${images.length} 张)';
 }
 
 class WebDavFolderImporter implements Importer {
@@ -329,6 +339,25 @@ class WebDavFolderImporter implements Importer {
     final subdirs = rootEntries.where((e) => e.isDirectory).toList()
       ..sort((a, b) => compareByOriginalName(a.name, b.name));
 
+    // ── 压缩包：**一个包就是一本书** ──
+    //
+    // 商用网盘上的漫画常常按"一话一个 zip"存放，所以这是主路径而非补充。
+    // 好处：**一次 PROPFIND 就能扫出全部书** —— 目录列表里已经带了
+    // getcontentlength，不需要再逐个文件请求。
+    final archives = rootEntries
+        .where((e) => !e.isDirectory && _isArchiveName(e.name))
+        .toList()
+      ..sort((a, b) => compareByOriginalName(a.name, b.name));
+    for (final a in archives) {
+      out.add(WebDavComicCandidate(
+        url: a.url,
+        name: a.name,
+        images: const [],
+        isArchive: true,
+        archiveSize: a.size,
+      ));
+    }
+
     final scanTargets = subdirs.length > maxScannedFolders
         ? subdirs.sublist(0, maxScannedFolders)
         : subdirs;
@@ -404,4 +433,14 @@ class WebDavFolderImporter implements Importer {
       if (owned) c.close();
     }
   }
+}
+
+/// 支持在线读取的压缩包扩展名。
+///
+/// 只认 **zip**（含改名的 .cbz）：它支持"读中央目录 + 按需读条目"。
+/// `.tar.gz` 必须从头顺序解压，没法随机访问，所以不列入 ——
+/// 列进来只会让用户导入后打开失败。
+bool _isArchiveName(String name) {
+  final lower = name.toLowerCase();
+  return lower.endsWith('.zip') || lower.endsWith('.cbz');
 }

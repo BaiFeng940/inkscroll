@@ -25,11 +25,13 @@ import '../data/models/reader_settings.dart';
 import '../data/prefs_store.dart';
 import '../data/webdav/webdav_connection.dart';
 import '../importers/import_router.dart';
+import '../importers/webdav_archive_importer.dart';
 import '../importers/webdav_folder_importer.dart';
 import '../reader/cover_generator.dart';
 import '../reader/document.dart';
 import '../reader/document_codec.dart';
 import '../reader/page_cache.dart';
+import '../reader/webdav_archive_resolver.dart';
 import '../reader/webdav_page_resolver.dart';
 
 class AppState extends ChangeNotifier {
@@ -198,6 +200,39 @@ class AppState extends ChangeNotifier {
           onImportProgress?.call(i + 1, fresh.length, label);
 
           try {
+            if (c.isArchive) {
+              // ★ 网盘上的压缩包：一本书 = 一个包。
+              //   只读中央目录 + 少量样本，不解压整包。
+              final bookId = ByteStore.newBookId();
+              final doc = await WebDavArchiveImporter.buildDocument(
+                client: client,
+                connectionId: connection.id,
+                archiveUrl: c.url,
+                archiveName: c.name,
+                knownSize: c.archiveSize,
+              );
+              await DocumentCodec.save(store.bookDir(bookId), doc);
+              final meta = BookMeta(
+                id: bookId,
+                title: c.name,
+                kind: BookKind.comic,
+                source: WebDavArchiveSource(
+                  connectionId: connection.id,
+                  archiveUrl: c.url,
+                  archiveName: c.name,
+                  archiveSize: c.archiveSize,
+                ),
+                pageCount: doc.pageCount,
+                chapterCount: doc.chapterCount,
+                importedAt: DateTime.now(),
+                description:
+                    doc.warnings.isEmpty ? null : doc.warnings.join('\n'),
+              );
+              pending.add(meta);
+              imported.add(meta);
+              continue;
+            }
+
             // 直接建 Document，跳过单本导入的重复扫描。
             // ★ 复用同一条连接：每本新建 client 都要重做一次 TCP+TLS
             //   握手，走公网隧道时 100 本书能白白多花几十秒。
@@ -264,7 +299,8 @@ class AppState extends ChangeNotifier {
   List<BookMeta> get favorites => books.where((b) => b.isFavorite).toList();
 
   /// 这本书是"在线库"（来自 NAS）还是"本地库"
-  static bool isOnline(BookMeta b) => b.source is WebDavSource;
+  static bool isOnline(BookMeta b) =>
+      b.source is WebDavSource || b.source is WebDavArchiveSource;
 
   /// 本地库：文件夹 / 压缩包 / 散图导入的书
   List<BookMeta> get localBooks {
@@ -620,6 +656,38 @@ class AppState extends ChangeNotifier {
             client: conn.createClient(),
             cacheDir: Directory(store.webdavCacheDirFor(book.id)),
             pageList: doc.pagesInOrder,
+          ),
+        );
+
+      case WebDavArchiveSource(
+          :final connectionId,
+          :final archiveUrl,
+          :final archiveName,
+          :final archiveSize
+        ):
+        final conn = webdavConnections.byId(connectionId);
+        if (conn == null) {
+          throw const GenericError(
+            '这条网盘连接已被删除。\n'
+            '请重新添加网盘后再次导入这本书。',
+          );
+        }
+        final doc = cached ??
+            await WebDavArchiveImporter.buildDocument(
+              client: conn.createClient(),
+              connectionId: connectionId,
+              archiveUrl: archiveUrl,
+              archiveName: archiveName,
+              knownSize: archiveSize,
+            );
+        return (
+          document: doc,
+          resolver: WebDavArchivePageResolver(
+            client: conn.createClient(),
+            archiveUrl: archiveUrl,
+            archiveSize: archiveSize,
+            cacheDir: Directory(store.webdavCacheDirFor(book.id)),
+            pages: doc.pagesInOrder,
           ),
         );
 
