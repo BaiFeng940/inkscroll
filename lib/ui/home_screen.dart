@@ -386,7 +386,7 @@ class _HomeScreenState extends State<HomeScreen> with SingleTickerProviderStateM
                   onDelete: _confirmDelete,
                   emptyHint: '在线库还是空的。\n'
                       '点右上角「设置」→ 添加 WebDAV 库，\n'
-                      '连上 NAS 后选一个漫画根目录，\n'
+                      '连上网盘后选一个漫画根目录，\n'
                       '它下面每个含图片的子文件夹都会变成一本书。',
                   emptyAction: TextButton.icon(
                     icon: const Icon(Icons.settings_outlined, size: 18),

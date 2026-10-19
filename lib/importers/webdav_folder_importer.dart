@@ -78,7 +78,7 @@ class WebDavFolderImporter implements Importer {
   Future<ImportOutcome> run(ImportContext ctx) async {
     final conn = connection;
     if (conn == null) {
-      return const ImportFailure(GenericError('缺少 NAS 连接信息'));
+      return const ImportFailure(GenericError('缺少网盘连接信息'));
     }
     final folderUrl = ctx.pick.webdavFolderUrl;
     if (folderUrl == null || folderUrl.isEmpty) {
@@ -113,7 +113,7 @@ class WebDavFolderImporter implements Importer {
       rethrow;
     } catch (e, st) {
       return ImportFailure(GenericError(
-        '从 NAS 导入失败：$e',
+        '从网盘导入失败：$e',
         technicalDetail: st.toString(),
       ));
     } finally {
@@ -132,7 +132,7 @@ class WebDavFolderImporter implements Importer {
       final entries = await client.list(folderUrl);
       final images = _collectImages(entries, client, folderUrl);
       if (images.isEmpty) {
-        throw const GenericError('NAS 上的这个文件夹里已经没有图片了');
+        throw const GenericError('这个文件夹里已经没有图片了');
       }
       return await _build(
         ctx: null,
@@ -236,7 +236,7 @@ class WebDavFolderImporter implements Importer {
     return Document(
       id: 'doc_${conn.id}_${_hash(folderUrl)}',
       bookId: '',
-      title: folderName.isEmpty ? 'NAS 文件夹' : folderName,
+      title: folderName.isEmpty ? '网盘文件夹' : folderName,
       kind: DocumentKind.comic,
       chapters: [Chapter(index: 0, title: '图片', pageIds: pageIds)],
       pages: pages,
@@ -251,7 +251,7 @@ class WebDavFolderImporter implements Importer {
               '翻到时会自动校正。',
         if (truncated)
           '文件夹里有 ${images.length} 张图，已只取前 $maxPages 张。',
-        '这些图片在 NAS 上，阅读时需要联网；看过的页会自动缓存到本地。',
+        '这些图片在网盘上，阅读时需要联网；看过的页会自动缓存到本地。',
       ],
     );
   }
@@ -344,7 +344,7 @@ class WebDavFolderImporter implements Importer {
 
   static String _folderNameOf(String url) {
     final segs = Uri.tryParse(url)?.pathSegments.where((s) => s.isNotEmpty).toList();
-    if (segs == null || segs.isEmpty) return 'NAS 文件夹';
+    if (segs == null || segs.isEmpty) return '网盘文件夹';
     return segs.last;
   }
 
