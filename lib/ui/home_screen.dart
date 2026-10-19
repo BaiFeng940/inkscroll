@@ -560,13 +560,36 @@ class _BookGrid extends StatelessWidget {
         mainAxisSpacing: 12,
       ),
       itemCount: books.length,
-      itemBuilder: (ctx, i) => _BookCard(
-        book: books[i],
-        onOpen: onOpen,
-        onChanged: onChanged,
-        onDelete: onDelete,
-      ),
+      itemBuilder: (ctx, i) {
+        final book = books[i];
+        // ★ 只为**真正会被渲染的**卡片请求封面。
+        //
+        // 启动时给整个书架排队生成封面，在几百本的在线库上等于
+        // 几百次整图下载 —— 用户感知就是"打开 App 卡半天"。
+        // GridView.builder 只会构建可见（含少量预取）的项，
+        // 所以在这里触发天然就是"按需"。
+        _requestCoverOnce(ctx, book);
+        return _BookCard(
+          book: book,
+          onOpen: onOpen,
+          onChanged: onChanged,
+          onDelete: onDelete,
+        );
+      },
     );
+  }
+
+  /// 每张卡片每次会话最多请求一次封面（AppState 内部还有去重队列）
+  static final Set<String> _requested = <String>{};
+
+  static void _requestCoverOnce(BuildContext ctx, BookMeta book) {
+    if (book.coverPath != null) return;
+    if (!_requested.add(book.id)) return;
+    // 不能在 build 期间改状态，推到下一帧
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (!ctx.mounted) return;
+      ctx.read<AppState>().requestCover(book);
+    });
   }
 }
 

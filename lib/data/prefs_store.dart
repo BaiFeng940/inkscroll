@@ -114,6 +114,40 @@ class PrefsStore {
     }
   }
 
+  /// 批量写入多本书（**一次**读 + **一次**写）。
+  ///
+  /// 批量导入时逐本调用 [upsertBook] 的代价是 O(n²)：每本都要把整个
+  /// 书架的 JSON 解析一遍再序列化一遍。书架越大越慢，表现为导入到
+  /// 后半段明显卡顿。
+  ///
+  /// ★ 实现上不能"边遍历边 insert(0)"：向头部插入会让所有已记录的
+  /// 下标整体错位，后续按旧下标更新就会**覆盖到别的书**上，
+  /// 表现是书架出现重复项、且书名错乱（这个 bug 被单元测试抓到过）。
+  /// 所以先按 id 分成"已有 → 就地替换"和"新增 → 收集"，最后一次性拼装。
+  Future<void> upsertBooks(List<BookMeta> incoming) async {
+    if (incoming.isEmpty) return;
+    final books = loadBooks();
+    final existingIds = <String>{for (final b in books) b.id};
+
+    final replacements = <String, BookMeta>{};
+    final additions = <BookMeta>[];
+    for (final book in incoming) {
+      if (existingIds.contains(book.id)) {
+        replacements[book.id] = book;
+      } else {
+        additions.add(book);
+        // 同一批里重复出现的 id 也要认作"已存在"，否则会加两次
+        existingIds.add(book.id);
+      }
+    }
+
+    await saveBooks([
+      // 与 upsertBook 一致：新书在最前，且保持批内顺序（后者靠前）
+      ...additions.reversed,
+      for (final b in books) replacements[b.id] ?? b,
+    ]);
+  }
+
   // ------------------------------------------------------------------
   // 阅读进度（按模式分开存）
   // ------------------------------------------------------------------
