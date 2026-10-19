@@ -1,0 +1,35 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+  网络安全配置。
+
+  ## 为什么需要这个文件
+
+  Android 9（API 28）起，系统**默认禁止明文 HTTP**。
+  而家用 NAS 的 WebDAV 非常常见是 `http://192.168.x.x:5005` 这种纯 HTTP ——
+  用户填了 http 地址就会连不上，且报错是底层的 SocketException，很难理解。
+
+  这里允许明文流量，但**只放开必要的范围**：
+    · 允许 cleartext（让 http:// 的 NAS 能用）
+    · 自签名证书由 App 内的 `badCertificateCallback` 处理，
+      这里不需要额外声明信任锚
+
+  ## 安全说明
+
+  允许明文意味着局域网内流量不加密。这是**用户自己的选择**：
+  填 http:// 就是用明文，填 https:// 就有 TLS 保护。
+  App 在连接界面明确推荐 HTTPS，并且对自签证书有专门的开关和提示。
+
+  ## 关于 INTERNET 权限
+
+  注意：**权限不在这里声明**，必须在 AndroidManifest.xml 里。
+  这个文件只管 TLS/明文策略。
+-->
+<network-security-config>
+    <!-- 允许明文 HTTP（家用 NAS 的 WebDAV 常用 HTTP） -->
+    <base-config cleartextTrafficPermitted="true">
+        <trust-anchors>
+            <!-- 系统 CA：用于访问公网正常 HTTPS 服务（如隧道/Bing 等） -->
+            <certificates src="system" />
+        </trust-anchors>
+    </base-config>
+</network-security-config>
