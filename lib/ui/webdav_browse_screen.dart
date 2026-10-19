@@ -216,7 +216,7 @@ class _WebDavBrowseScreenState extends State<WebDavBrowseScreen> {
       },
       child: Scaffold(
         appBar: AppBar(
-          title: Text(_active == null ? '连接 NAS' : _active!.displayLabel),
+          title: Text(_active == null ? '连接 WebDAV' : _active!.displayLabel),
           leading: IconButton(
             icon: const Icon(Icons.arrow_back),
             onPressed: () {
@@ -253,7 +253,7 @@ class _WebDavBrowseScreenState extends State<WebDavBrowseScreen> {
       padding: const EdgeInsets.all(16),
       children: [
         if (_connections.isNotEmpty) ...[
-          const Text('选择一台 NAS', style: TextStyle(fontWeight: FontWeight.w600)),
+          const Text('选择一个 WebDAV 网盘', style: TextStyle(fontWeight: FontWeight.w600)),
           const SizedBox(height: 8),
           ..._connections.map((c) => Card(
                 margin: const EdgeInsets.only(bottom: 8),
@@ -646,13 +646,16 @@ class _ConnectionFormState extends State<_ConnectionForm> {
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
         Text(
-          '添加 NAS 连接',
+          '添加 WebDAV 网盘',
           style: theme.textTheme.titleMedium?.copyWith(fontWeight: FontWeight.w600),
         ),
         const SizedBox(height: 4),
         Text(
-          '支持任何 WebDAV 服务：飞牛 OS、群晖、威联通、Alist、Nextcloud…',
-          style: TextStyle(fontSize: 12, color: theme.hintColor),
+          '任何标准 WebDAV 服务都能连：私有云（飞牛 / 群晖 / 威联通）'
+          '与商用网盘（坚果云 / Nextcloud / Alist 等）。\n'
+          '百度网盘、阿里云盘这类**不自带 WebDAV** 的网盘，'
+          '需要先用 Alist 之类的网关转成 WebDAV 再连。',
+          style: TextStyle(fontSize: 12, color: theme.hintColor, height: 1.5),
         ),
         const SizedBox(height: 16),
 
@@ -713,7 +716,7 @@ class _ConnectionFormState extends State<_ConnectionForm> {
           dense: true,
           title: const Text('允许自签名证书', style: TextStyle(fontSize: 13)),
           subtitle: const Text(
-            '家用 NAS 的 HTTPS 多为自签证书。'
+            '自建网盘的 HTTPS 多为自签证书。'
             '只在你自己信任的家庭网络里打开；局域网内直接用 http:// 更省事。',
             style: TextStyle(fontSize: 11),
           ),
@@ -741,7 +744,7 @@ class _ConnectionFormState extends State<_ConnectionForm> {
                       color: theme.hintColor,
                     ),
                     children: const [
-                      TextSpan(text: '建议在 NAS 上单独建一个'),
+                      TextSpan(text: '建议单独建一个'),
                       TextSpan(
                         text: '只读',
                         style: TextStyle(fontWeight: FontWeight.w700),

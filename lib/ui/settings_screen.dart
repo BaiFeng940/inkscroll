@@ -52,7 +52,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
           const Divider(height: 24),
 
           // ── 在线库 ──
-          _SectionHeader('在线库（NAS / WebDAV）'),
+          _SectionHeader('在线库（WebDAV 网盘）'),
           Padding(
             padding: const EdgeInsets.fromLTRB(16, 0, 16, 8),
             child: RichText(
@@ -64,8 +64,10 @@ class _SettingsScreenState extends State<SettingsScreen> {
                 ),
                 children: const [
                   TextSpan(
-                    text: '支持飞牛 OS、群晖、威联通、Alist、Nextcloud 等所有 '
-                        'WebDAV 服务。\n添加后选中一个目录，它下面',
+                    text: '任何标准 WebDAV 服务都能连：'
+                        '私有云（飞牛、群晖、威联通、TrueNAS）与商用网盘'
+                        '（坚果云、Nextcloud、Alist 等）。\n'
+                        '连接后选一个目录，它下面',
                   ),
                   TextSpan(
                     text: '每个含图片的子文件夹',
@@ -81,7 +83,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
             Padding(
               padding: const EdgeInsets.fromLTRB(16, 8, 16, 8),
               child: Text(
-                '还没有添加任何 NAS。',
+                '还没有添加任何网盘。',
                 style: TextStyle(fontSize: 13, color: theme.hintColor),
               ),
             )
@@ -134,15 +136,15 @@ class _SettingsScreenState extends State<SettingsScreen> {
           const ListTile(
             leading: Icon(Icons.info_outline),
             title: Text('inkScroll'),
-            subtitle: Text('版本 0.3.4 · 本地与 NAS 漫画阅读器\n'
-                '不收集任何数据；只有你主动连接 NAS 时才有网络请求'),
+            subtitle: Text('版本 0.3.5 · 本地与网盘漫画阅读器\n'
+                '不收集任何数据；只有你主动连接网盘时才有网络请求'),
             isThreeLine: true,
           ),
           ListTile(
             leading: const Icon(Icons.storage_outlined),
             title: const Text('缓存说明'),
             subtitle: const Text(
-              '从 NAS 看过的页会自动缓存到本地，断网也能看已缓存的；'
+              '从网盘看过的页会自动缓存到本地，断网也能看已缓存的；'
               '删除某本在线书时缓存一并清除。',
               style: TextStyle(fontSize: 12),
             ),
@@ -176,35 +178,38 @@ class _SettingsScreenState extends State<SettingsScreen> {
             mainAxisSize: MainAxisSize.min,
             children: [
               Text(
-                '能做到，而且不需要装任何额外软件 —— '
-                '只要家里的宽带分到了公网 IP，在路由器上做一次端口映射即可。',
+                '有两条路，取决于你家的网络怎么接的。先做第 1 步判断，再选走哪条。',
                 style: TextStyle(fontSize: 13, height: 1.55),
               ),
               SizedBox(height: 14),
               _HelpStep(
                 n: '1',
-                title: '确认有公网 IP',
+                title: '判断有没有公网 IP',
                 body: '在能上网的电脑上搜「IP」，看查到的地址和路由器「WAN 口地址」是否一致。'
-                    '如果一致 → 有公网 IP；如果是 100.64.x.x 开头 → 运营商大内网，这条路不通。',
+                    '一致 → 有公网 IP，走方案 A；'
+                    '是 100.64.x.x 开头、或光猫后面还套了一层路由器 → 走方案 B。',
               ),
               _HelpStep(
-                n: '2',
-                title: '在路由器上做端口映射',
+                n: 'A',
+                title: '有公网 IP：路由器端口映射',
                 body: '主路由器 → 端口转发 / 虚拟服务器：'
-                    '外部端口（比如 50068）→ 内网 192.168.10.105:5006（TCP）。'
-                    '建议用非标准的外部端口，减少被扫描。',
+                    '外部端口（如 50068）→ 内网 NAS 的 5006（TCP）。'
+                    '再配个 DDNS 域名（飞牛自带），地址填 https://你的域名:50068。\n'
+                    '注意：光猫和路由器双层 NAT 时，两层都要做映射才通。',
               ),
               _HelpStep(
-                n: '3',
-                title: '配一个 DDNS 域名',
-                body: '家用宽带公网 IP 会变。飞牛 OS 自带 DDNS（设置 → 网络 → DDNS），'
-                    '也可以。拿到形如 nas.example.com 的域名。',
+                n: 'B',
+                title: '没有公网 IP：用隧道穿透',
+                body: 'chmlfrp / frp / Cloudflare Tunnel 这类内网穿透，'
+                    '由 NAS 主动向外连接，能绕过双层 NAT 和运营商限制。\n'
+                    '关键三点：端口类型选 TCP（保留 TLS 端到端）、'
+                    '本地端口填 5006、加密和压缩都关掉。',
               ),
               _HelpStep(
-                n: '4',
-                title: '在 App 里填域名',
-                body: '地址填 https://你的域名:外部端口，'
-                    '和局域网里填的地址并存两条连接，在家/在外各用一条。',
+                n: 'C',
+                title: '在 App 里填最终地址',
+                body: '把隧道给的外网地址或你的域名填进来，'
+                    '和局域网地址并存两条连接，在家/在外各用一条。',
               ),
               SizedBox(height: 10),
               _HelpWarn(),
@@ -260,7 +265,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
     final ok = await showDialog<bool>(
       context: context,
       builder: (ctx) => AlertDialog(
-        title: const Text('删除这条 NAS 连接？'),
+        title: const Text('删除这条网盘连接？'),
         content: Text(
           '${c.displayLabel}\n${c.baseUrl}\n\n'
           '只删除连接与保存的密码，已经导入到在线库的书不受影响'
@@ -451,8 +456,8 @@ class _HelpWarn extends StatelessWidget {
           SizedBox(width: 8),
           Expanded(
             child: Text(
-              '把 NAS 暴露到公网有风险。请务必：'
-              '① 在 NAS 上建一个只读的 WebDAV 账号给阅读器；'
+              '把网盘服务暴露到公网有风险。请务必：'
+              '① 建一个只读的 WebDAV 账号给阅读器；'
               '② 用非标准外部端口；'
               '③ 保持 HTTPS（自签也行）。',
               style: TextStyle(fontSize: 12, height: 1.55),

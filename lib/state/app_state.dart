@@ -26,6 +26,7 @@ import '../data/prefs_store.dart';
 import '../data/webdav/webdav_connection.dart';
 import '../importers/import_router.dart';
 import '../importers/webdav_folder_importer.dart';
+import '../reader/cover_generator.dart';
 import '../reader/document.dart';
 import '../reader/document_codec.dart';
 import '../reader/page_cache.dart';
@@ -70,6 +71,10 @@ class AppState extends ChangeNotifier {
     settings = _prefs.loadSettings();
     ready = true;
     notifyListeners();
+
+    // 给历史数据补封面（老版本导入的书没有 coverPath）。
+    // 后台跑，不阻塞启动。
+    ensureAllCovers();
   }
 
   // ------------------------------------------------------------------
@@ -120,7 +125,7 @@ class AppState extends ChangeNotifier {
     final client = connection.createClient();
     List<WebDavComicCandidate> candidates;
     try {
-      _setProgress(0, '正在扫描 NAS 目录…');
+      _setProgress(0, '正在扫描网盘目录…');
       candidates = await WebDavFolderImporter.scanLibrary(
         client,
         folderUrl,
@@ -149,35 +154,43 @@ class AppState extends ChangeNotifier {
     final imported = <BookMeta>[];
     final failures = <String>[];
 
-    for (var i = 0; i < candidates.length; i++) {
-      final c = candidates[i];
-      final label = '${c.name}（${c.pageCount} 页）';
-      _setProgress(
-        0.4 + 0.6 * (i / candidates.length),
-        '正在导入 ${i + 1}/${candidates.length}：$label',
-      );
-      onImportProgress?.call(i + 1, candidates.length, label);
+    // 整批期间不生成封面，结束后统一在后台补（见 _scheduleCover 注释）
+    _deferCovers = true;
+    try {
+      for (var i = 0; i < candidates.length; i++) {
+        final c = candidates[i];
+        final label = '${c.name}（${c.pageCount} 页）';
+        _setProgress(
+          0.4 + 0.6 * (i / candidates.length),
+          '正在导入 ${i + 1}/${candidates.length}：$label',
+        );
+        onImportProgress?.call(i + 1, candidates.length, label);
 
-      try {
-        // 直接建 Document，跳过单本导入的重复扫描
-        final doc = await WebDavFolderImporter.buildFromCandidate(
-          connection: connection,
-          candidate: c,
-        );
-        final pick = SourcePick(
-          kind: SourcePickKind.webdav,
-          displayName: c.name,
-          sourceId: ByteStore.newBookId(),
-          uri: Uri.tryParse(c.url),
-          webdavConnectionId: connection.id,
-          webdavFolderUrl: c.url,
-          webdavFolderName: c.name,
-        );
-        final book = await _persist(pick, doc);
-        imported.add(book);
-      } catch (e) {
-        failures.add('${c.name}: $e');
+        try {
+          // 直接建 Document，跳过单本导入的重复扫描
+          final doc = await WebDavFolderImporter.buildFromCandidate(
+            connection: connection,
+            candidate: c,
+          );
+          final pick = SourcePick(
+            kind: SourcePickKind.webdav,
+            displayName: c.name,
+            sourceId: ByteStore.newBookId(),
+            uri: Uri.tryParse(c.url),
+            webdavConnectionId: connection.id,
+            webdavFolderUrl: c.url,
+            webdavFolderName: c.name,
+          );
+          final book = await _persist(pick, doc);
+          imported.add(book);
+        } catch (e) {
+          failures.add('${c.name}: $e');
+        }
       }
+    } finally {
+      _deferCovers = false;
+      // 整批结束后在后台顺序补封面，用户回到书架时它们会逐个出现
+      ensureAllCovers();
     }
 
     await webdavConnections.touch(connection.id);
@@ -319,7 +332,7 @@ class AppState extends ChangeNotifier {
       final conn = webdavConnections.byId(pick.webdavConnectionId ?? '');
       if (conn == null) {
         throw const GenericError(
-          '找不到这条 NAS 连接。\n请在「从 NAS 导入」里重新选择一次。',
+          '找不到这条网盘连接。\n请在「从网盘导入」里重新选择一次。',
         );
       }
       importer = WebDavFolderImporter(connection: conn);
@@ -388,7 +401,96 @@ class AppState extends ChangeNotifier {
     await _prefs.upsertBook(meta);
     books = _prefs.loadBooks();
     notifyListeners();
+
+    // 封面取自第一张图片。**不 await** —— 在线库的书要拉一页网络数据，
+    // 不能让它拖慢导入（批量导入几十本时尤其明显）。
+    _scheduleCover(meta);
     return meta;
+  }
+
+  // ------------------------------------------------------------------
+  // 封面
+  // ------------------------------------------------------------------
+
+  /// 队列：待生成封面的书 id
+  final Set<String> _coverQueue = <String>{};
+  bool _coverWorkerRunning = false;
+
+  void _scheduleCover(BookMeta book) {
+    // 批量导入期间先攒着，等整批结束再统一生成 ——
+    // 否则每存一本书就插一次网络请求，会把导入本身拖慢好几倍。
+    if (_deferCovers) return;
+    if (book.coverPath != null && File(book.coverPath!).existsSync()) return;
+    _coverQueue.add(book.id);
+    unawaited(_drainCovers());
+  }
+
+  /// 批量导入期间推迟封面生成
+  bool _deferCovers = false;
+
+  /// 后台**顺序**生成缺失的封面。
+  ///
+  /// 顺序而不是并发：在线库的书每本要多一次网络请求，
+  /// 并发会把 NAS / 网盘打满，反而更慢，还可能触发限流。
+  Future<void> _drainCovers() async {
+    if (_coverWorkerRunning) return;
+    _coverWorkerRunning = true;
+    try {
+      while (_coverQueue.isNotEmpty) {
+        final id = _coverQueue.first;
+        _coverQueue.remove(id);
+        BookMeta? book;
+        for (final b in books) {
+          if (b.id == id) {
+            book = b;
+            break;
+          }
+        }
+        if (book == null) continue;
+        if (book.coverPath != null && File(book.coverPath!).existsSync()) {
+          continue;
+        }
+        await ensureCover(book);
+      }
+    } finally {
+      _coverWorkerRunning = false;
+    }
+  }
+
+  /// 确保这本书有封面（取自第一张图片），生成后落盘并刷新书架。
+  ///
+  /// 任何失败都**静默忽略** —— 封面只是锦上添花，
+  /// 不能因为某本书第一页读不出来就影响书架显示或导入结果。
+  Future<void> ensureCover(BookMeta book) async {
+    final existing = book.coverPath;
+    if (existing != null && File(existing).existsSync()) return;
+
+    try {
+      final built = await buildDocument(book);
+      try {
+        final path = await CoverGenerator.create(
+          resolver: built.resolver,
+          document: built.document,
+          bookDirPath: store.bookDir(book.id),
+        );
+        if (path != null) {
+          await _prefs.setCover(book.id, path);
+          books = _prefs.loadBooks();
+          notifyListeners();
+        }
+      } finally {
+        await built.resolver.dispose();
+      }
+    } catch (_) {
+      // 封面失败不影响阅读，静默跳过
+    }
+  }
+
+  /// 为所有还缺封面的书排一次队（启动时调用，补齐历史数据）。
+  void ensureAllCovers() {
+    for (final b in books) {
+      _scheduleCover(b);
+    }
   }
 
   BookSource _sourceFor(SourcePick pick) {
@@ -436,8 +538,8 @@ class AppState extends ChangeNotifier {
         final conn = webdavConnections.byId(connectionId);
         if (conn == null) {
           throw const GenericError(
-            '这条 NAS 连接已被删除。\n'
-            '请重新添加 NAS 后再次导入这本书。',
+            '这条网盘连接已被删除。\n'
+            '请重新添加网盘后再次导入这本书。',
           );
         }
         final doc = cached ??

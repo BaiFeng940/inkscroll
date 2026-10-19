@@ -112,8 +112,8 @@ final class NetworkUnreachableError extends AppError {
   const NetworkUnreachableError({String? address, String? detail})
       : super(
           '连接不上服务器。\n'
-          '请检查：地址和端口是否正确、NAS 是否开机、'
-          '手机和 NAS 是否在同一个局域网、WebDAV 服务是否已开启。',
+          '请检查：地址和端口是否正确、网盘服务是否开机、'
+          '手机和网盘服务是否在同一个局域网、WebDAV 是否已开启。',
           technicalDetail: '${address ?? ''} $detail',
           action: ErrorAction.retry,
         );
@@ -124,7 +124,7 @@ final class NetworkAuthError extends AppError {
   const NetworkAuthError({String? detail})
       : super(
           '用户名或密码不正确。\n'
-          '请确认是 NAS 的 WebDAV 账号（不一定与登录 NAS 网页的账号相同）。',
+          '请确认是网盘的 WebDAV 账号（不一定与登录其网页的账号相同）。',
           technicalDetail: detail,
           action: ErrorAction.enterPassword,
         );
@@ -148,7 +148,7 @@ final class NotWebDavError extends AppError {
   const NotWebDavError({String? detail})
       : super(
           '这个地址看起来不是 WebDAV 服务。\n'
-          '你填的可能是 NAS 的网页管理地址。\n'
+          '你填的可能是网盘的网页管理地址。\n'
           '请在飞牛 OS 里开启「文件服务 → WebDAV」，'
           '然后填写形如 http://192.168.1.10:5005/dav 的地址。',
           technicalDetail: detail,
@@ -161,7 +161,7 @@ final class NetworkCertificateError extends AppError {
   const NetworkCertificateError({String? detail})
       : super(
           'HTTPS 证书校验失败。\n'
-          '家用 NAS 通常使用自签证书。你可以：\n'
+          '自建网盘通常使用自签证书。你可以：\n'
           '· 改用 http:// 地址（局域网内可以接受）；或\n'
           '· 在下方打开「允许自签名证书」。',
           technicalDetail: detail,
