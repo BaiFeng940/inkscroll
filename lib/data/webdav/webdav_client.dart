@@ -330,20 +330,53 @@ class WebDavClient {  WebDavClient({
   /// 列出某个目录下的直接子项（不含自己）
   ///
   /// [folderUrl] 必须是绝对 URL；传 `baseUrl` 即列出根目录。
+  ///
+  /// ## 为什么优先发**空体** PROPFIND
+  ///
+  /// RFC 4918 §9.1 规定：PROPFIND 不带请求体等价于 `allprop`，是合法的。
+  ///
+  /// 而飞牛 fnOS 的 WebDAV 实现**会拒绝任何带 XML 体的 PROPFIND**，
+  /// 一律返回 `400 Bad Request` —— 也就是说所有"标准写法"的客户端
+  /// （发 `<propfind><prop>...</prop></propfind>`）在飞牛上都列不出目录。
+  ///
+  /// 这个坑极其隐蔽：错误码 400 看起来像"请求格式错"，很容易被误判成
+  /// 地址/权限问题。所以默认走空体；只有服务器明确表示"必须要体"
+  /// （400/415 的表单变体）时，才回退到带体的标准写法。
   Future<List<WebDavEntry>> list(String folderUrl) async {
     final target = folderUrl.isEmpty ? baseUrl : folderUrl;
     // 有些服务器要求目录 URL 以 / 结尾才认作集合
     final uri = Uri.parse(target.endsWith('/') ? target : '$target/');
 
-    http.Response resp;
+    var resp = await _propfind(uri, target, withBody: false);
+
+    // 少数服务器不接受空体（严格实现要显式 prop 列表），回退一次。
+    // 飞牛走不到这里 —— 它正好相反：**拒绝**带体。
+    if (resp.statusCode == 400 || resp.statusCode == 415) {
+      final retry = await _propfind(uri, target, withBody: true);
+      if (retry.statusCode != 400 && retry.statusCode != 415) {
+        resp = retry;
+      }
+    }
+
+    return _parseMultiStatus(resp, target, uri);
+  }
+
+  Future<http.Response> _propfind(
+    Uri uri,
+    String target, {
+    required bool withBody,
+  }) async {
     try {
       final req = http.Request('PROPFIND', uri)
         ..headers.addAll(_authHeaders)
-        ..headers['Depth'] = '1'
-        ..headers['Content-Type'] = 'application/xml; charset=utf-8'
-        ..bodyBytes = utf8.encode(_propfindBody);
+        ..headers['Depth'] = '1';
+      if (withBody) {
+        req
+          ..headers['Content-Type'] = 'application/xml; charset=utf-8'
+          ..bodyBytes = utf8.encode(_propfindBody);
+      }
       final streamed = await _client.send(req).timeout(_timeout);
-      resp = await http.Response.fromStream(streamed);
+      return await http.Response.fromStream(streamed);
     } on HandshakeException catch (e) {
       throw NetworkCertificateError(detail: '$e');
     } on TimeoutException catch (e) {
@@ -361,7 +394,13 @@ class WebDavClient {  WebDavClient({
     } catch (e) {
       throw NetworkUnreachableError(address: target, detail: '$e');
     }
+  }
 
+  List<WebDavEntry> _parseMultiStatus(
+    http.Response resp,
+    String target,
+    Uri uri,
+  ) {
     _throwIfBadStatus(resp, target);
 
     // 207 才是 WebDAV 多状态响应。有些 NAS 在"地址填错成网页"时返回 200 + HTML。
