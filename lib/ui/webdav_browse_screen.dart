@@ -94,10 +94,11 @@ class _WebDavBrowseScreenState extends State<WebDavBrowseScreen> {
       if (!mounted) return;
       if (widget.presetConnection != null) {
         _openConnection(widget.presetConnection!);
-      } else if (_connections.length == 1) {
-        // 只有一条连接时直接进去，少一次点击
-        _openConnection(_connections.first);
       }
+      // ★ 这里曾经有个"只有一条连接就直接进去，少一次点击"的优化。
+      //   它让「添加 WebDAV 库」在已有一条连接时**直接进入那条连接的浏览页**，
+      //   用户根本看不到表单 —— 等于**再也加不了第二个网盘**。
+      //   省一次点击不值这个代价，删掉。
     });
   }
 

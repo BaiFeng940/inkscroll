@@ -193,6 +193,13 @@ class DocumentCodec {
         return {'t': 'inline', 'b64': base64Encode(ref.bytes)};
       case WebDavRef():
         return {'t': 'webdav', 'url': ref.url, 'conn': ref.connectionId};
+      case WebDavArchiveRef():
+        return {
+          't': 'webdavArchive',
+          'archiveUrl': ref.archiveUrl,
+          'entry': ref.entryPath,
+          'conn': ref.connectionId,
+        };
     }
   }
 
@@ -210,6 +217,12 @@ class DocumentCodec {
         return WebDavRef(
           url: m['url'] as String,
           connectionId: m['conn'] as String? ?? '',
+        );
+      case 'webdavArchive':
+        return WebDavArchiveRef(
+          connectionId: m['conn'] as String? ?? '',
+          archiveUrl: m['archiveUrl'] as String,
+          entryPath: m['entry'] as String,
         );
       case 'file':
       default:

@@ -514,6 +514,34 @@ void main() {
     });
   });
 
+  group('BookSource · 网盘压缩包', () {
+    test('WebDavArchiveSource 序列化往返一致', () {
+      const src = WebDavArchiveSource(
+        connectionId: 'c1',
+        archiveUrl: 'http://pan/webdav/%E5%9D%8F%E7%8B%BC.zip',
+        archiveName: '坏狼.zip',
+        archiveSize: 638427,
+      );
+      final back = BookSource.fromJson(src.toJson());
+      expect(back, isA<WebDavArchiveSource>());
+      final a = back as WebDavArchiveSource;
+      expect(a.connectionId, 'c1');
+      expect(a.archiveUrl, src.archiveUrl);
+      expect(a.archiveName, '坏狼.zip');
+      expect(a.archiveSize, 638427);
+    });
+
+    test('archiveSize 缺省时也能往返（老数据/拿不到大小）', () {
+      const src = WebDavArchiveSource(
+        connectionId: 'c2',
+        archiveUrl: 'http://pan/a.cbz',
+        archiveName: 'a.cbz',
+      );
+      final back = BookSource.fromJson(src.toJson()) as WebDavArchiveSource;
+      expect(back.archiveSize, isNull);
+    });
+  });
+
   group('BookSource · WebDavSource 序列化', () {
     test('往返一致', () {
       const src = WebDavSource(
