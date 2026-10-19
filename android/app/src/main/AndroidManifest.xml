@@ -1,8 +1,25 @@
 <manifest xmlns:android="http://schemas.android.com/apk/res/android">
+    <!-- ★★ 必须显式声明 INTERNET 权限 ★★
+         
+         Flutter 模板**只在 src/debug/AndroidManifest.xml 里**加了这一条
+         （为了热重载），**src/main 里没有** —— 所以：
+           · debug 包联网正常
+           · **release 包联网被系统直接拒绝**
+         
+         表现是 SocketException: Operation not permitted (errno = 1)，
+         而错误信息看起来很像是"网络不通/地址写错"，极具误导性。
+         这个 bug 在模拟器用 debug 包测试时**永远发现不了**。
+         
+         教训：所有涉及联网的功能，必须在 **release 包**上验证。 -->
+    <uses-permission android:name="android.permission.INTERNET"/>
+    <!-- 用于从 NAS 拉取页字节时显示进度（可选，缺了也能用） -->
+    <uses-permission android:name="android.permission.ACCESS_NETWORK_STATE"/>
+
     <application
         android:label="inkScroll"
         android:name="${applicationName}"
-        android:icon="@mipmap/ic_launcher">
+        android:icon="@mipmap/ic_launcher"
+        android:networkSecurityConfig="@xml/network_security_config">
         <activity
             android:name=".MainActivity"
             android:exported="true"
