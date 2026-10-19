@@ -134,7 +134,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
           const ListTile(
             leading: Icon(Icons.info_outline),
             title: Text('inkScroll'),
-            subtitle: Text('版本 0.3.3 · 本地与 NAS 漫画阅读器\n'
+            subtitle: Text('版本 0.3.4 · 本地与 NAS 漫画阅读器\n'
                 '不收集任何数据；只有你主动连接 NAS 时才有网络请求'),
             isThreeLine: true,
           ),

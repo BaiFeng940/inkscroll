@@ -282,6 +282,56 @@ void main() {
     });
   });
 
+  group('WebDavClient · PROPFIND 请求体兼容性', () {
+    // 飞牛 fnOS 的 WebDAV **拒绝任何带 XML 体的 PROPFIND**，一律 400。
+    // 而 RFC 4918 §9.1 规定空体等价于 allprop —— 所以空体才是最大兼容写法。
+    // 这个坑很隐蔽：400 看起来像"请求格式错"，极易被误判成地址/权限问题。
+    const multi = '<?xml version="1.0" encoding="UTF-8"?>'
+        '<D:multistatus xmlns:D="DAV:">'
+        '<D:response><D:href>/dav/</D:href><D:propstat><D:prop>'
+        '<D:resourcetype><D:collection/></D:resourcetype>'
+        '</D:prop><D:status>HTTP/1.1 200 OK</D:status></D:propstat></D:response>'
+        '<D:response><D:href>/dav/a.jpg</D:href><D:propstat><D:prop>'
+        '<D:getcontentlength>123</D:getcontentlength>'
+        '</D:prop><D:status>HTTP/1.1 200 OK</D:status></D:propstat></D:response>'
+        '</D:multistatus>';
+
+    test('默认发空体 PROPFIND（不发 XML）', () async {
+      final bodies = <String>[];
+      final client = WebDavClient(
+        baseUrl: 'http://nas/dav',
+        httpClient: MockClient((req) async {
+          expect(req.method, 'PROPFIND');
+          expect(req.headers['Depth'], '1');
+          bodies.add(req.body);
+          return http.Response(multi, 207);
+        }),
+      );
+      final items = await client.list('http://nas/dav/');
+      expect(bodies.single, isEmpty, reason: '飞牛只接受空体 PROPFIND');
+      expect(items.length, 1);
+      expect(items.first.name, 'a.jpg');
+    });
+
+    test('服务器对空体回 400 时才回退到带体写法', () async {
+      final bodies = <String>[];
+      final client = WebDavClient(
+        baseUrl: 'http://nas/dav',
+        httpClient: MockClient((req) async {
+          bodies.add(req.body);
+          // 模拟"必须要请求体"的严格服务器
+          if (req.body.isEmpty) return http.Response('Bad Request', 400);
+          return http.Response(multi, 207);
+        }),
+      );
+      final items = await client.list('http://nas/dav/');
+      expect(bodies.length, 2, reason: '应该重试一次');
+      expect(bodies[0], isEmpty);
+      expect(bodies[1], contains('propfind'));
+      expect(items.length, 1);
+    });
+  });
+
   group('WebDavClient · Range 取头部', () {
     test('服务器返回 206 时原样返回', () async {
       final bytes = Uint8List.fromList(List.filled(32, 0xFF));
