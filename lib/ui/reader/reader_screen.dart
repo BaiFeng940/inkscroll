@@ -90,9 +90,11 @@ class _ReaderScreenState extends State<ReaderScreen> {
         resolver: resolved.resolver,
       );
 
-      // 默认模式：优先用这本书上次用过的模式
+      // 默认模式：这本书上次用过的 > 用户在设置里指定的 > 按内容自动判断
       final remembered = widget.settings.lastModePerBook[widget.book.id];
-      controller.mode = remembered ?? _defaultModeFor(resolved.document);
+      controller.mode = remembered ??
+          widget.settings.defaultMode ??
+          _defaultModeFor(resolved.document);
 
       if (!mounted) {
         controller.dispose();

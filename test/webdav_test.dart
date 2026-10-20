@@ -19,7 +19,9 @@ import 'package:http/http.dart' as http;
 import 'package:http/testing.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import 'package:inkscroll/core/errors.dart';
+import 'package:inkscroll/data/models/reader_settings.dart';
 import 'package:inkscroll/data/prefs_store.dart';
+import 'package:inkscroll/state/app_state.dart';
 import 'package:inkscroll/data/webdav/webdav_client.dart';
 import 'package:inkscroll/data/models/book_meta.dart';
 import 'package:inkscroll/data/webdav/webdav_connection.dart';
@@ -539,6 +541,49 @@ void main() {
       );
       final back = BookSource.fromJson(src.toJson()) as WebDavArchiveSource;
       expect(back.archiveSize, isNull);
+    });
+  });
+
+  group('ReaderSettings · 默认翻页方式', () {
+    test('缺省为 null（自动），序列化后仍为 null', () {
+      const s = ReaderSettings();
+      expect(s.defaultMode, isNull);
+      final back = ReaderSettings.fromJson(s.toJson());
+      expect(back.defaultMode, isNull);
+    });
+
+    test('指定模式往返一致', () {
+      const s = ReaderSettings(defaultMode: ReadingMode.horizontal);
+      final back = ReaderSettings.fromJson(s.toJson());
+      expect(back.defaultMode, ReadingMode.horizontal);
+    });
+
+    test('copyWith 能显式恢复为自动', () {
+      const s = ReaderSettings(defaultMode: ReadingMode.verticalContinuous);
+      // 只传 defaultMode: null 无法区分"没传"与"设为 null"，
+      // 所以用 clearDefaultMode 这个显式开关。
+      final auto = s.copyWith(clearDefaultMode: true);
+      expect(auto.defaultMode, isNull);
+      expect(s.copyWith(margin: 20).defaultMode,
+          ReadingMode.verticalContinuous);
+    });
+  });
+
+  group('CacheStats · 人类可读格式', () {
+    test('各量级都合理', () {
+      expect(CacheStats.human(512), '512 B');
+      expect(CacheStats.human(2048), '2.0 KB');
+      expect(CacheStats.human(3 * 1024 * 1024), '3.0 MB');
+      expect(CacheStats.human(2 * 1024 * 1024 * 1024), '2.00 GB');
+    });
+
+    test('total 是三项之和', () {
+      const s = CacheStats(
+        webdavBytes: 100,
+        extractedBytes: 200,
+        coverBytes: 300,
+      );
+      expect(s.total, 600);
     });
   });
 

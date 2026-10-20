@@ -31,6 +31,30 @@ class ByteStore {
     return ByteStore._(dir);
   }
 
+  /// 写入 `.nomedia`，让系统相册 / 媒体库**不要扫描**本应用的私有目录。
+  ///
+  /// 我们导入的漫画（含从压缩包解压出来的图、从网盘缓存的页）全都存在
+  /// 应用私有目录里，正常不会被 MediaStore 收录；但不同厂商的媒体扫描器
+  /// 行为不一致，显式放一个 `.nomedia` 是零成本的保险 ——
+  /// 用户导入的漫画不应该出现在系统相册里。
+  Future<void> ensureNoMedia() async {
+    try {
+      final marker = File(p.join(root.path, '.nomedia'));
+      if (!await marker.exists()) {
+        await marker.writeAsString('');
+      }
+      // 解压/缓存目录也可能被单独扫描，各放一份
+      for (final sub in const ['.', 'cache']) {
+        final dir = Directory(p.join(root.path, sub));
+        if (await dir.exists()) {
+          final m = File(p.join(dir.path, '.nomedia'));
+          if (!await m.exists()) await m.writeAsString('');
+        }
+      }
+    } catch (_) {
+      // 写不进去也不影响功能
+    }
+  }
   String bookDir(String bookId) => p.join(root.path, bookId);
 
   /// 供 DocumentCodec 直接使用
