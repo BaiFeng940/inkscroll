@@ -115,3 +115,78 @@ A: GitCode 的镜像仓库支持「同步」按钮，但不能定时自动拉取
 **Q: 一定要用 GitCode 吗？**
 A: 不一定。`kUpdateSources` 是个列表，加任何返回同类 JSON 的源都行。
    GitCode 只是目前国内访问最稳的选择。
+---
+
+## 六、发布流程（实测可行，照这个做）
+
+> 以下流程已在 `0.8.0` 上完整跑通并验证。
+
+### 谁做什么
+
+| 步骤 | 谁做 | 命令 / 操作 |
+|---|---|---|
+| 1. 构建 + 发布到 GitHub | 我 | `flutter build apk --release --split-per-abi`，然后打 tag 推 GitHub |
+| 2. 推代码 + tag 到 GitCode | 我 | `pwsh -File tool/push-to-gitcode.ps1` |
+| 3. **在 GitCode 网页建 release 并一起上传 APK** | **你** | 见下 |
+| 4. 校验镜像资产 | 我 | `pwsh -File tool/verify-gitcode-release.ps1 -Version x.y.z` |
+
+### 第 3 步：为什么必须你来
+
+**GitCode 的 release 附件上传接口没有公开文档，实测不通**：
+
+| 尝试的端点 | 结果 |
+|---|---|
+| `POST /releases/{tag}/attach_files` | 404 |
+| `POST /releases/{tag}/upload_assets` | 404 |
+| `POST /releases/attach_files` | **405**（存在但不收 POST） |
+| `PUT /releases/attach_files` | 405 |
+| `POST /releases/{id}/attach_files` | 404 |
+| `api.gitcode.com/...` 同路径 | 404 Route Not Found |
+
+而且 release 对象**不返回 `release_id`**，所以连"按 id 上传"这条路也走不通。
+
+**结论**：创建 release 时在网页上把 APK 一起传，是唯一可靠的方式。
+所以**不要用脚本预先创建 release** —— 空 release 建出来之后还要回头编辑补附件，
+不如直接一步到位。
+
+### 网页操作要点
+
+1. 打开 <https://gitcode.com/BaiFeng940/inkscroll/releases/new>
+2. Tag 填 `v<版本>`（和 GitHub 一致，tag 必须先推上去）
+3. 标题填 `inkScroll <版本>`
+4. 说明复制 GitHub 上那份（保持两边文案一致）
+5. **同一个表单里把两个 APK 一起拖进去**：
+   ```
+   dist/inkscroll-<版本>-arm64-v8a.apk
+   dist/inkscroll-<版本>-armeabi-v7a.apk
+   ```
+6. 发布
+
+### 第 4 步：必须校验
+
+```powershell
+powershell.exe -NoProfile -ExecutionPolicy Bypass `
+  -File tool/verify-gitcode-release.ps1 -Version 0.8.0
+```
+
+它会检查四件事：
+
+1. release 的 tag 是否等于目标版本
+2. assets 里有没有 **`type=attach` 的 `.apk`**
+   （`v0.8.0.zip` / `.tar.gz` 这些是 `type=source`，**任何 tag 都自动生成，不是安装包**）
+3. 每个 APK 能否真的 GET 到（206/200）
+4. 下载下来的文件 SHA256 是否与本地 `dist/` 一致
+
+> ⚠️ **脚本一律用 GET，不用 HEAD。** GitCode 对 `HEAD` 返回 **401**，
+> 看起来像"文件下不了"，实际 `GET` 是 200 并重定向到 `file-cdn.gitcode.com`。
+> 用 HEAD 判断会得出完全错误的结论。
+
+### 只有第 3、4 步都过了，才算真正闭环
+
+应用侧的顺序是 **GitCode → GitHub**，只要 GitCode 上版本号够新，
+就不会再回落到 GitHub。所以镜像上的 APK 必须是**完整可下载**的，
+否则用户点了「去下载」会卡在 GitCode 的 401/404 上。
+
+代码里也做了兜底：镜像的 assets 里如果**没有** `.apk`，
+`downloadUrl` 会按命名规范推导 GitHub 同版本直链 —— 但这只是保底，
+国内下 GitHub 依然慢。
