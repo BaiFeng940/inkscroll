@@ -84,6 +84,7 @@ class ReaderSettings {
     this.keepScreenOn = true,
     this.themeMode = ThemeMode.system,
     this.lastModePerBook = const {},
+    this.defaultMode,
   });
 
   final ReadingMode mode;
@@ -105,6 +106,13 @@ class ReaderSettings {
   /// 每本书最后使用的模式：bookId -> mode
   final Map<String, ReadingMode> lastModePerBook;
 
+  /// 还没读过的书默认用哪种模式。
+  ///
+  /// `null` 表示**自动**：按内容版式判断（长条图判为上下滑动，普通页
+  /// 判为左右翻页）。保留"自动"这个选项很关键 —— 硬性指定某种模式
+  /// 会让另一类漫画读起来很难受。
+  final ReadingMode? defaultMode;
+
   ReaderSettings copyWith({
     ReadingMode? mode,
     ReaderBackground? background,
@@ -117,6 +125,8 @@ class ReaderSettings {
     bool? keepScreenOn,
     ThemeMode? themeMode,
     Map<String, ReadingMode>? lastModePerBook,
+    ReadingMode? defaultMode,
+    bool clearDefaultMode = false,
   }) {
     return ReaderSettings(
       mode: mode ?? this.mode,
@@ -130,6 +140,9 @@ class ReaderSettings {
       keepScreenOn: keepScreenOn ?? this.keepScreenOn,
       themeMode: themeMode ?? this.themeMode,
       lastModePerBook: lastModePerBook ?? this.lastModePerBook,
+      // 用 clearDefaultMode 显式表达"恢复自动"，因为 null 也是有效值
+      defaultMode:
+          clearDefaultMode ? null : (defaultMode ?? this.defaultMode),
     );
   }
 
@@ -146,6 +159,7 @@ class ReaderSettings {
         'themeMode': themeMode.name,
         'lastModePerBook':
             lastModePerBook.map((k, v) => MapEntry(k, v.name)),
+        if (defaultMode != null) 'defaultMode': defaultMode!.name,
       };
 
   static ReaderSettings fromJson(Map<String, dynamic> json) {
@@ -163,6 +177,11 @@ class ReaderSettings {
       themeMode: _enumByName(ThemeMode.values, json['themeMode'], ThemeMode.system),
       lastModePerBook: ((json['lastModePerBook'] as Map?) ?? const {})
           .map((k, v) => MapEntry(k as String, _modeFromName(v))),
+      // 缺省 / null = 自动（不能回退成某个具体模式，否则升级后
+      // 会凭空改变老用户的阅读习惯）
+      defaultMode: json['defaultMode'] == null
+          ? null
+          : _modeFromName(json['defaultMode']),
     );
   }
 

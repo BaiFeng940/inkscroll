@@ -66,6 +66,8 @@ class AppState extends ChangeNotifier {
 
   Future<void> bootstrap() async {
     _store = await ByteStore.open();
+    // 隐私：确保导入的漫画不会被系统相册扫描到
+    await _store!.ensureNoMedia();
     _router = ImportRouter(store: _store!);
     _extraction = ExtractionManager(store: _store!);
     _webdavStore = WebDavConnectionStore(_prefs.prefs);
@@ -598,8 +600,87 @@ class AppState extends ChangeNotifier {
     }
   }
 
-  /// 曾经在启动时给整个书架排队补封面，已废除。
+  // ------------------------------------------------------------------
+  // 缓存统计与清理
+  // ------------------------------------------------------------------
+
+  /// 统计可清理的缓存占用。
   ///
+  /// 只算**纯缓存**：
+  ///   · `netcache/`  —— 从网盘拉下来的页（删了下次重拉）
+  ///   · `extracted/` —— 本地压缩包的解压产物（删了回退到直接读 zip）
+  ///   · `cover.png`  —— 封面缩略图（删了会重新生成）
+  ///
+  /// **不含** `document.json`（删了要重扫目录）和 SharedPreferences
+  /// （书架与网盘连接都在里面）—— 这也是"清缓存不会断开连接"的原因。
+  Future<CacheStats> cacheStats() async {
+    var net = 0;
+    var extracted = 0;
+    var covers = 0;
+    for (final b in books) {
+      net += await _dirSize(store.webdavCacheDirFor(b.id));
+      extracted += await _dirSize(store.extractedDirFor(b.id));
+      final cover = b.coverPath;
+      if (cover != null) {
+        try {
+          final f = File(cover);
+          if (await f.exists()) covers += await f.length();
+        } catch (_) {}
+      }
+    }
+    return CacheStats(
+      webdavBytes: net,
+      extractedBytes: extracted,
+      coverBytes: covers,
+    );
+  }
+
+  /// 清理全部缓存。**不动**书架、网盘连接、阅读进度。
+  Future<void> clearCache() async {
+    for (final b in books) {
+      await _deleteDir(store.webdavCacheDirFor(b.id));
+      await _deleteDir(store.extractedDirFor(b.id));
+    }
+    // 封面的内存态也要一起清，否则界面还显示旧图
+    for (final b in books) {
+      b.coverPath = null;
+    }
+    _coverQueue.clear();
+    await _prefs.saveBooks(books);
+    books = _prefs.loadBooks();
+    notifyListeners();
+    // 可见的卡片会重新请求封面
+    ensureAllCovers();
+  }
+
+  Future<int> _dirSize(String path) async {
+    try {
+      final dir = Directory(path);
+      if (!await dir.exists()) return 0;
+      var total = 0;
+      await for (final e in dir.list(recursive: true, followLinks: false)) {
+        if (e is File) {
+          try {
+            total += await e.length();
+          } catch (_) {}
+        }
+      }
+      return total;
+    } catch (_) {
+      return 0;
+    }
+  }
+
+  Future<void> _deleteDir(String path) async {
+    try {
+      final dir = Directory(path);
+      if (await dir.exists()) await dir.delete(recursive: true);
+    } catch (_) {
+      // 单个目录删不掉（正被读）不影响其它
+    }
+  }
+
+  /// 曾经在启动时给整个书架排队补封面，已废除。
   /// 在线库的书生成封面要**下载一整张原图**。几百本的书架就是几百次
   /// 整图下载，用户感知是"打开 App 卡半天"，比没有封面糟糕得多。
   /// 现在改为由书架卡片在**可见时**调用 [requestCover] 按需触发。
@@ -1014,4 +1095,33 @@ class WebDavLibraryResult {
   final bool allAlreadyAdded;
 
   bool get isEmpty => scanned == 0;
+}
+
+/// 可清理缓存的构成
+class CacheStats {
+  const CacheStats({
+    required this.webdavBytes,
+    required this.extractedBytes,
+    required this.coverBytes,
+  });
+
+  /// 网盘页缓存（netcache/）
+  final int webdavBytes;
+
+  /// 本地压缩包解压产物（extracted/）
+  final int extractedBytes;
+
+  /// 封面缩略图
+  final int coverBytes;
+
+  int get total => webdavBytes + extractedBytes + coverBytes;
+
+  static String human(int bytes) {
+    if (bytes < 1024) return '$bytes B';
+    if (bytes < 1024 * 1024) return '${(bytes / 1024).toStringAsFixed(1)} KB';
+    if (bytes < 1024 * 1024 * 1024) {
+      return '${(bytes / 1024 / 1024).toStringAsFixed(1)} MB';
+    }
+    return '${(bytes / 1024 / 1024 / 1024).toStringAsFixed(2)} GB';
+  }
 }

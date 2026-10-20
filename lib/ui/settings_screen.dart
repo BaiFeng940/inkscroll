@@ -17,6 +17,7 @@ import 'package:provider/provider.dart';
 
 import '../data/webdav/webdav_connection.dart';
 import '../core/errors.dart';
+import '../data/models/reader_settings.dart';
 import '../state/app_state.dart';
 import 'webdav_browse_screen.dart';
 
@@ -28,6 +29,93 @@ class SettingsScreen extends StatefulWidget {
 }
 
 class _SettingsScreenState extends State<SettingsScreen> {
+  CacheStats? _cache;
+  bool _cacheClearing = false;
+
+  @override
+  void initState() {
+    super.initState();
+    WidgetsBinding.instance.addPostFrameCallback((_) => _refreshCache());
+  }
+
+  Future<void> _refreshCache() async {
+    if (!mounted) return;
+    try {
+      final stats = await context.read<AppState>().cacheStats();
+      if (!mounted) return;
+      setState(() => _cache = stats);
+    } catch (_) {
+      // 统计失败不影响设置页
+    }
+  }
+
+  String _cacheLabel(CacheStats? s) {
+    if (s == null) return '正在统计…';
+    if (s.total == 0) return '暂无缓存';
+    return '共 ${CacheStats.human(s.total)}'
+        '（网盘页 ${CacheStats.human(s.webdavBytes)}'
+        ' · 解压 ${CacheStats.human(s.extractedBytes)}'
+        ' · 封面 ${CacheStats.human(s.coverBytes)}）';
+  }
+
+  Future<void> _clearCache(AppState app) async {
+    setState(() => _cacheClearing = true);
+    try {
+      await app.clearCache();
+      await _refreshCache();
+      if (!mounted) return;
+      ScaffoldMessenger.of(context)
+        ..hideCurrentSnackBar()
+        ..showSnackBar(const SnackBar(
+          content: Text('缓存已清理。书架与网盘连接都还在。'),
+          behavior: SnackBarBehavior.floating,
+        ));
+    } finally {
+      if (mounted) setState(() => _cacheClearing = false);
+    }
+  }
+
+  String _modeLabel(ReadingMode? m) => switch (m) {
+        null => '自动（按内容判断）',
+        ReadingMode.horizontal => '左右翻页',
+        ReadingMode.verticalContinuous => '上下滑动',
+      };
+
+  Future<void> _pickDefaultMode(AppState app) async {
+    final picked = await showModalBottomSheet<Object>(
+      context: context,
+      builder: (ctx) => SafeArea(
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            ListTile(
+              leading: const Icon(Icons.auto_awesome_outlined),
+              title: const Text('自动（按内容判断）'),
+              subtitle: const Text('长条图用上下滑动，普通页用左右翻页'),
+              onTap: () => Navigator.of(ctx).pop(_autoValue),
+            ),
+            for (final m in ReadingMode.values)
+              ListTile(
+                leading: Icon(m.icon),
+                title: Text(m.label),
+                subtitle: Text(m.description),
+                onTap: () => Navigator.of(ctx).pop(m),
+              ),
+          ],
+        ),
+      ),
+    );
+    if (picked == null || !mounted) return;
+    await app.updateSettings(
+      picked is ReadingMode
+          ? app.settings.copyWith(defaultMode: picked)
+          : app.settings.copyWith(clearDefaultMode: true),
+    );
+  }
+
+  /// 哨兵值，表示用户选了"自动"
+  static const String _autoValue = '__auto__';
+
   @override
   Widget build(BuildContext context) {
     final app = context.watch<AppState>();
@@ -47,6 +135,95 @@ class _SettingsScreenState extends State<SettingsScreen> {
             subtitle: Text(_themeLabel(app.settings.themeMode)),
             trailing: const Icon(Icons.chevron_right),
             onTap: () => _pickTheme(app),
+          ),
+
+          const Divider(height: 24),
+
+          // ── 阅读 ──
+          _SectionHeader('阅读'),
+          ListTile(
+            leading: const Icon(Icons.swipe_outlined),
+            title: const Text('默认翻页方式'),
+            subtitle: Text(_modeLabel(app.settings.defaultMode)),
+            trailing: const Icon(Icons.chevron_right),
+            onTap: () => _pickDefaultMode(app),
+          ),
+
+          const Divider(height: 24),
+
+          // ── 通过压缩包导入 ──
+          _SectionHeader('通过压缩包导入'),
+          Padding(
+            padding: const EdgeInsets.fromLTRB(16, 0, 16, 8),
+            child: RichText(
+              text: TextSpan(
+                style: TextStyle(
+                  fontSize: 12,
+                  height: 1.6,
+                  color: theme.hintColor,
+                ),
+                children: const [
+                  TextSpan(
+                    text: '支持的格式：',
+                    style: TextStyle(fontWeight: FontWeight.w700),
+                  ),
+                  TextSpan(
+                    text: '.zip / .cbz（推荐）、.tar\n'
+                        '包内图片支持 JPG / PNG / GIF / WebP / BMP / AVIF。\n\n',
+                  ),
+                  TextSpan(
+                    text: '网盘上的压缩包也能直接导入：',
+                    style: TextStyle(fontWeight: FontWeight.w700),
+                  ),
+                  TextSpan(
+                    text: '不用先把压缩包下载到手机。导入时只读取压缩包的'
+                        '目录结构，翻到哪一页才下载那一页 —— '
+                        '200 MB 的包通常几秒就能建好，也不占手机空间。\n\n',
+                  ),
+                  TextSpan(
+                    text: '需要一点耐心：',
+                    style: TextStyle(fontWeight: FontWeight.w700),
+                  ),
+                  TextSpan(
+                    text: '每本压缩包都要联网读目录并抽样测量图片尺寸，'
+                        '所以导入一个几十本的库通常要几分钟。'
+                        '进度条会显示当前处理到第几本；'
+                        '请保持应用在前台、耐心等待，中途退出会中断这一批导入。',
+                  ),
+                ],
+              ),
+            ),
+          ),
+
+          const Divider(height: 24),
+
+          // ── 存储 ──
+          _SectionHeader('存储'),
+          ListTile(
+            leading: const Icon(Icons.cleaning_services_outlined),
+            title: const Text('清理缓存'),
+            subtitle: Text(_cacheLabel(_cache)),
+            trailing: _cacheClearing
+                ? const SizedBox(
+                    width: 18,
+                    height: 18,
+                    child: CircularProgressIndicator(strokeWidth: 2),
+                  )
+                : TextButton(
+                    onPressed: (_cache?.total ?? 0) == 0
+                        ? null
+                        : () => _clearCache(app),
+                    child: const Text('清理'),
+                  ),
+          ),
+          Padding(
+            padding: const EdgeInsets.fromLTRB(16, 0, 16, 12),
+            child: Text(
+              '只清理「看过的页、解压产物、封面」这些可以随时重建的数据。'
+              '书架、阅读进度、网盘连接与密码都不会被删除。',
+              style: TextStyle(
+                  fontSize: 11, height: 1.5, color: theme.hintColor),
+            ),
           ),
 
           const Divider(height: 24),
@@ -151,7 +328,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
           const ListTile(
             leading: Icon(Icons.info_outline),
             title: Text('inkScroll'),
-            subtitle: Text('版本 0.3.9 · 本地与网盘漫画阅读器\n'
+            subtitle: Text('版本 0.4.0 · 本地与网盘漫画阅读器\n'
                 '不收集任何数据；只有你主动连接网盘时才有网络请求'),
             isThreeLine: true,
           ),
