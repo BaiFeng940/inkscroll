@@ -4,6 +4,24 @@ plugins {
     id("dev.flutter.flutter-gradle-plugin")
 }
 
+// ── 发布签名 ────────────────────────────────────────────────────────────
+//
+// 密钥和口令放在 **仓库之外**（android/key.properties 已被 .gitignore 排除，
+// 且指向仓库外的绝对路径），所以它们永远不会被提交。
+//
+// 找不到 key.properties 时自动退回 debug 签名 —— 这样在没有密钥的机器上
+// （比如 CI）仍然能构建出可安装的包，只是签名不同、不能覆盖安装。
+import java.util.Properties
+import java.io.FileInputStream
+
+val keystorePropsFile = rootProject.file("key.properties")
+val keystoreProps = Properties().apply {
+    if (keystorePropsFile.exists()) {
+        FileInputStream(keystorePropsFile).use { load(it) }
+    }
+}
+val hasReleaseKey = keystoreProps.getProperty("storeFile") != null
+
 android {
     namespace = "com.inkscroll.reader"
     compileSdk = flutter.compileSdkVersion
@@ -12,6 +30,21 @@ android {
     compileOptions {
         sourceCompatibility = JavaVersion.VERSION_17
         targetCompatibility = JavaVersion.VERSION_17
+    }
+
+    signingConfigs {
+        if (hasReleaseKey) {
+            create("release") {
+                storeFile = file(keystoreProps.getProperty("storeFile"))
+                storePassword = keystoreProps.getProperty("storePassword")
+                keyAlias = keystoreProps.getProperty("keyAlias")
+                keyPassword = keystoreProps.getProperty("keyPassword")
+                // 签名算法：Android 7+（API 24+）用 V2，兼顾老设备保留 V1
+                enableV1Signing = true
+                enableV2Signing = true
+                enableV3Signing = true
+            }
+        }
     }
 
     defaultConfig {
@@ -31,9 +64,12 @@ android {
 
     buildTypes {
         release {
-            // TODO: Add your own signing config for the release build.
-            // Signing with the debug keys for now, so `flutter run --release` works.
-            signingConfig = signingConfigs.getByName("debug")
+            // 有发布密钥就用它；没有则退回 debug（仅用于本机验证）
+            signingConfig = if (hasReleaseKey) {
+                signingConfigs.getByName("release")
+            } else {
+                signingConfigs.getByName("debug")
+            }
         }
     }
 }

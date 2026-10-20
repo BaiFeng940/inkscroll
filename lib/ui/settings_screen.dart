@@ -302,6 +302,18 @@ class _SettingsScreenState extends State<SettingsScreen> {
             ),
           ),
 
+          // 「合集」结构识别（默认开启）
+          SwitchListTile(
+            secondary: const Icon(Icons.account_tree_outlined),
+            title: const Text('识别「合集」结构'),
+            subtitle: const Text(
+              '默认开启。如果所选目录下那一层文件夹只是分类（自己没有放图片），'
+              '会再往下找一层 —— 用于识别「漫画根目录 / 某某合集 / 第一话」。',
+            ),
+            value: app.deepScanLibrary,
+            onChanged: (v) => app.setDeepScanLibrary(v),
+          ),
+
           if (conns.isEmpty)
             Padding(
               padding: const EdgeInsets.fromLTRB(16, 8, 16, 8),
@@ -374,7 +386,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
           const ListTile(
             leading: Icon(Icons.info_outline),
             title: Text('inkScroll'),
-            subtitle: Text('版本 0.4.1 · 本地与网盘漫画阅读器\n'
+            subtitle: Text('版本 0.5.0 · 本地与网盘漫画阅读器\n'
                 '不收集任何数据；只有你主动连接网盘时才有网络请求'),
             isThreeLine: true,
           ),

@@ -105,6 +105,17 @@ class PrefsStore {
     }
   }
 
+  /// 「合集」深度扫描开关（默认开）。
+  ///
+  /// 关掉后只扫描所选目录的直接子目录；打开时会再往下找一层，
+  /// 用来识别 `漫画根目录/某某合集/第一话/` 这种组织方式。
+  static const _kDeepScan = 'library.deepScan.v1';
+
+  bool loadDeepScan() => _prefs.getBool(_kDeepScan) ?? true;
+
+  Future<void> saveDeepScan(bool value) async {
+    await _prefs.setBool(_kDeepScan, value);
+  }
   Future<void> setCover(String bookId, String coverPath) async {
     final books = loadBooks();
     final i = books.indexWhere((b) => b.id == bookId);

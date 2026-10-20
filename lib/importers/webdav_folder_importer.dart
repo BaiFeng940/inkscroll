@@ -322,6 +322,7 @@ class WebDavFolderImporter implements Importer {
     WebDavClient client,
     String folderUrl, {
     void Function(int done, int total, String name)? onProgress,
+    bool deepScan = true,
   }) async {
     final out = <WebDavComicCandidate>[];
 
@@ -368,7 +369,8 @@ class WebDavFolderImporter implements Importer {
     // PROPFIND 的往返就有几十到几百毫秒，100 个文件夹光等就几十秒。
     // 这里用固定大小的 worker 池并发，结果按**原始顺序**放回数组，
     // 保证导入顺序和目录名自然序一致（并发完成顺序不可控）。
-    final slots = List<WebDavComicCandidate?>.filled(scanTargets.length, null);
+    final slots = List<List<WebDavComicCandidate>?>.filled(
+        scanTargets.length, null);
     var next = 0;
     var done = 0;
 
@@ -378,15 +380,12 @@ class WebDavFolderImporter implements Importer {
         if (i >= scanTargets.length) return;
         final dir = scanTargets[i];
         try {
-          final entries = await client.list(dir.url);
-          final images = _collectImages(entries, client, dir.url);
-          if (images.isNotEmpty) {
-            slots[i] = WebDavComicCandidate(
-              url: dir.url,
-              name: dir.name,
-              images: images,
-            );
-          }
+          slots[i] = await _scanOneLevel(
+            client,
+            dir.url,
+            dir.name,
+            deepScan: deepScan,
+          );
         } catch (_) {
           // 单个子目录读失败（权限 / 已删除）不影响其他
         }
@@ -397,11 +396,102 @@ class WebDavFolderImporter implements Importer {
 
     final workers = math.min(scanConcurrency, math.max(1, scanTargets.length));
     await Future.wait(List.generate(workers, (_) => worker()));
-    out.addAll(slots.whereType<WebDavComicCandidate>());
+    for (final list in slots) {
+      if (list != null) out.addAll(list);
+    }
 
     return out;
   }
 
+
+  /// 每一层"合集"最多再展开多少个子目录（防止误选根目录时炸开）
+  static const int maxNested = 40;
+
+  /// 扫描一个直接子目录，返回它内部的书（可能是 1 本、多本、或 0 本）。
+  ///
+  /// ## 合集（嵌套一层）
+  ///
+  /// 现实里的收藏结构常常是：
+  /// ```
+  /// 漫画根目录/
+  /// └── 某某合集/          ← 这一层自己**没有图片**，只是分类
+  ///     ├── 第一话/
+  ///     └── 第二话/
+  /// ```
+  /// 只按"一层"扫就会把整个合集漏掉（表现为"导入了 0 本"）。
+  /// 所以当这一层既没有图片也没有压缩包时，**再往下找一层**。
+  ///
+  /// 只多探一层：更深的层级往往不是"一话"，继续递归既慢又容易把
+  /// 不相干的目录也导进来。
+  static Future<List<WebDavComicCandidate>> _scanOneLevel(
+    WebDavClient client,
+    String dirUrl,
+    String dirName, {
+    required bool deepScan,
+  }) async {
+    final out = <WebDavComicCandidate>[];
+    final entries = await client.list(dirUrl);
+
+    final images = _collectImages(entries, client, dirUrl);
+    if (images.isNotEmpty) {
+      out.add(WebDavComicCandidate(
+        url: dirUrl,
+        name: dirName,
+        images: images,
+      ));
+    }
+
+    final zips = entries
+        .where((e) => !e.isDirectory && _isArchiveName(e.name))
+        .toList()
+      ..sort((a, b) => compareByOriginalName(a.name, b.name));
+    for (final a in zips) {
+      out.add(WebDavComicCandidate(
+        url: a.url,
+        name: a.name,
+        images: const [],
+        isArchive: true,
+        archiveSize: a.size,
+      ));
+    }
+
+    if (out.isNotEmpty) return out;
+    if (!deepScan) return out;
+
+    // 这一层是"合集"容器：往下再找一层
+    final subs = entries.where((e) => e.isDirectory).toList()
+      ..sort((a, b) => compareByOriginalName(a.name, b.name));
+    for (final sub in subs.take(maxNested)) {
+      try {
+        final subEntries = await client.list(sub.url);
+        final subImages = _collectImages(subEntries, client, sub.url);
+        if (subImages.isNotEmpty) {
+          out.add(WebDavComicCandidate(
+            url: sub.url,
+            name: sub.name,
+            images: subImages,
+          ));
+          continue;
+        }
+        final subZips = subEntries
+            .where((e) => !e.isDirectory && _isArchiveName(e.name))
+            .toList()
+          ..sort((a, b) => compareByOriginalName(a.name, b.name));
+        for (final a in subZips) {
+          out.add(WebDavComicCandidate(
+            url: a.url,
+            name: a.name,
+            images: const [],
+            isArchive: true,
+            archiveSize: a.size,
+          ));
+        }
+      } catch (_) {
+        // 单个子目录失败不影响其他
+      }
+    }
+    return out;
+  }
   static String _folderNameOf(String url) {
     final segs = Uri.tryParse(url)?.pathSegments.where((s) => s.isNotEmpty).toList();
     if (segs == null || segs.isEmpty) return '网盘文件夹';
