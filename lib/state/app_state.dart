@@ -73,6 +73,7 @@ class AppState extends ChangeNotifier {
     _webdavStore = WebDavConnectionStore(_prefs.prefs);
     books = _prefs.loadBooks();
     settings = _prefs.loadSettings();
+    deepScanLibrary = _prefs.loadDeepScan();
     ready = true;
     notifyListeners();
 
@@ -133,6 +134,7 @@ class AppState extends ChangeNotifier {
       candidates = await WebDavFolderImporter.scanLibrary(
         client,
         folderUrl,
+        deepScan: deepScanLibrary,
         onProgress: (done, total, name) {
           _setProgress(
             total == 0 ? 0 : done / total * 0.4,
@@ -523,6 +525,15 @@ class AppState extends ChangeNotifier {
 
   /// 批量导入期间推迟封面生成
   bool _deferCovers = false;
+
+  /// 是否启用「合集」深度扫描（识别 根目录/合集/第一话 这种结构）
+  bool deepScanLibrary = true;
+
+  Future<void> setDeepScanLibrary(bool value) async {
+    deepScanLibrary = value;
+    await _prefs.saveDeepScan(value);
+    notifyListeners();
+  }
 
   /// 最近一次「添加为库」的结果摘要（设置页直接显示）。
   ///
