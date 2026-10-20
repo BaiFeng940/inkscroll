@@ -111,6 +111,28 @@ class PrefsStore {
   /// 用来识别 `漫画根目录/某某合集/第一话/` 这种组织方式。
   static const _kDeepScan = 'library.deepScan.v1';
 
+  /// 上次检查更新的时间（毫秒时间戳）。用于「一天最多自动检查一次」。
+  static const _kLastUpdateCheck = 'update.lastCheck.v1';
+
+  /// 用户点了「跳过这个版本」的版本号
+  static const _kSkippedVersion = 'update.skippedVersion.v1';
+
+  DateTime? loadLastUpdateCheck() {
+    final ms = _prefs.getInt(_kLastUpdateCheck);
+    if (ms == null) return null;
+    return DateTime.fromMillisecondsSinceEpoch(ms);
+  }
+
+  Future<void> saveLastUpdateCheck(DateTime t) async {
+    await _prefs.setInt(_kLastUpdateCheck, t.millisecondsSinceEpoch);
+  }
+
+  String? loadSkippedVersion() => _prefs.getString(_kSkippedVersion);
+
+  Future<void> saveSkippedVersion(String v) async {
+    await _prefs.setString(_kSkippedVersion, v);
+  }
+
   bool loadDeepScan() => _prefs.getBool(_kDeepScan) ?? true;
 
   Future<void> saveDeepScan(bool value) async {

@@ -23,6 +23,7 @@ import '../data/importer.dart';
 import '../data/models/book_meta.dart';
 import '../data/models/reader_settings.dart';
 import '../data/prefs_store.dart';
+import '../data/update_service.dart';
 import '../data/webdav/webdav_connection.dart';
 import '../importers/import_router.dart';
 import '../importers/webdav_archive_importer.dart';
@@ -419,6 +420,56 @@ class AppState extends ChangeNotifier {
   Future<void> refreshBooks() async {
     books = _prefs.loadBooks();
     notifyListeners();
+  }
+
+  // ------------------------------------------------------------------
+  // 检查更新
+  // ------------------------------------------------------------------
+
+  /// 上次检查更新的时间（面板展示用）
+  DateTime? lastUpdateCheck;
+  final UpdateService _updateService = UpdateService();
+
+  /// 是否允许「打开应用时自动检查」。
+  ///
+  /// 一天最多一次：检查更新会走外网，每次启动都请求既慢又没必要。
+  bool get shouldAutoCheckUpdate {
+    final last = lastUpdateCheck;
+    if (last == null) return true;
+    return DateTime.now().difference(last) > const Duration(hours: 24);
+  }
+
+  /// 用户点过「跳过这个版本」的版本号
+  String? get skippedVersion => _prefs.loadSkippedVersion();
+
+  Future<void> skipVersion(String v) async {
+    await _prefs.saveSkippedVersion(v);
+  }
+
+  /// 检查更新。`manual` 时忽略「已跳过」标记（用户主动点的就要看到结果）。
+  Future<UpdateCheckResult> checkUpdate({bool manual = false}) async {
+    final r = await _updateService.check();
+    if (r.checked) {
+      lastUpdateCheck = DateTime.now();
+      await _prefs.saveLastUpdateCheck(lastUpdateCheck!);
+      notifyListeners();
+    }
+    if (!manual && r.hasUpdate && r.latest != null) {
+      if (_prefs.loadSkippedVersion() == r.latest!.toString()) {
+        return UpdateCheckResult(
+          hasUpdate: false,
+          latest: r.latest,
+          sourceName: r.sourceName,
+        );
+      }
+    }
+    return r;
+  }
+
+  @override
+  void dispose() {
+    _updateService.close();
+    super.dispose();
   }
 
   // ------------------------------------------------------------------
