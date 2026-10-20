@@ -596,7 +596,13 @@ class WebDavClient {  WebDavClient({
   Future<Uint8List> getRangeAt(String url, int offset, int length) async {
     if (length <= 0) return Uint8List(0);
     final end = offset + length - 1;
-    final resp = await _sendGet(url, range: 'bytes=$offset-$end');
+    // 商用网盘会对"短时间内大量 Range 请求"做软限流（429 / 5xx / 连接重置）。
+    // 退避重试几次，比让整本书导入失败要好得多。
+    var resp = await _sendGet(url, range: 'bytes=$offset-$end');
+    for (var attempt = 0; attempt < 2 && _isTransient(resp.statusCode); attempt++) {
+      await Future<void>.delayed(Duration(milliseconds: 350 * (attempt + 1)));
+      resp = await _sendGet(url, range: 'bytes=$offset-$end');
+    }
 
     if (resp.statusCode == 206) return resp.bodyBytes;
 
@@ -640,6 +646,9 @@ class WebDavClient {  WebDavClient({
     }
   }
 
+  /// 这些状态码属于"稍后重试可能就好了"，不代表请求本身有错
+  static bool _isTransient(int code) =>
+      code == 429 || code == 408 || (code >= 500 && code <= 599);
   void _throwIfBadStatus(http.Response resp, String url) {
     final code = resp.statusCode;
     if (code >= 200 && code < 300) return;
