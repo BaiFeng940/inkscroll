@@ -172,6 +172,25 @@
 
     <div class="grid g3">
       <div class="card">
+        <h3>网盘压缩包在线读</h3>
+        <p>网盘上的 <code>.zip</code> / <code>.cbz</code> 不用先下载。
+           只读中央目录，翻到哪页才用 HTTP Range 取那页的字节 ——
+           196 MB 的包 4 秒建好书，翻页开销与包大小无关。</p>
+      </div>
+
+      <div class="card">
+        <h3>合集结构识别</h3>
+        <p>支持「漫画根目录 / 某某合集 / 第一话」这种多一层分类，
+           设置里可开关，默认开启。不再因为多了一层文件夹而导入 0 本。</p>
+      </div>
+
+      <div class="card">
+        <h3>批量管理</h3>
+        <p>长按任意一本书进入选择模式：全选、批量收藏、批量删除，
+           几百本的库也能一次收拾干净。</p>
+      </div>
+
+      <div class="card">
         <div class="ico">🗜️</div>
         <h3>压缩包按需读取</h3>
         <p>自己实现 ZIP 中央目录解析（含 Zip64），只解真正要显示的那一页；打开 1GB 的压缩包和打开 1MB 的一样快，不会一次性解压全部内容。</p>
@@ -407,7 +426,13 @@ flutter build apk --release --split-per-abi</pre>
       <a href="https://github.com/BaiFeng940/inkscroll/issues">反馈问题</a>
     </div>
   </div>
-</footer>
+  <div class="wrap" style="padding-bottom:40px">
+    <p style="font-size:11.5px;opacity:.55;line-height:1.7;margin:0">
+      图标征集：欢迎投稿 512×512 的 PNG 到
+      <a href="mailto:jk968922@163.com" style="opacity:.8">jk968922@163.com</a>，
+      采用后会在应用关于页署名。
+    </p>
+  </div></footer>
 
 </body>
 </html>

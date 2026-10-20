@@ -654,7 +654,7 @@ class _ConnectionFormState extends State<_ConnectionForm> {
         Text(
           '任何标准 WebDAV 服务都能连：私有云（飞牛 / 群晖 / 威联通）'
           '与商用网盘（坚果云 / Nextcloud / Alist 等）。\n'
-          '百度网盘、阿里云盘这类**不自带 WebDAV** 的网盘，'
+          '百度网盘、阿里云盘这类「不自带 WebDAV」的网盘，'
           '需要先用 Alist 之类的网关转成 WebDAV 再连。',
           style: TextStyle(fontSize: 12, color: theme.hintColor, height: 1.5),
         ),

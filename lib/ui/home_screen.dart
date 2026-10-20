@@ -33,6 +33,51 @@ class _HomeScreenState extends State<HomeScreen> with SingleTickerProviderStateM
   final _searchController = TextEditingController();
   String _query = '';
 
+  // ── 批量管理 ──
+  bool _selecting = false;
+  final Set<String> _selected = <String>{};
+
+  void _startSelect(BookMeta book) {
+    setState(() {
+      _selecting = true;
+      _selected
+        ..clear()
+        ..add(book.id);
+    });
+  }
+
+  void _toggleSelect(BookMeta book) {
+    setState(() {
+      if (!_selected.add(book.id)) _selected.remove(book.id);
+      // 取消到一本不剩时自动退出选择模式，避免空选状态卡住界面
+      if (_selected.isEmpty) _selecting = false;
+    });
+  }
+
+  void _selectAllToggle(List<BookMeta> visible) {
+    setState(() {
+      if (_selected.length == visible.length) {
+        _selected.clear();
+        _selecting = false;
+      } else {
+        _selected
+          ..clear()
+          ..addAll(visible.map((b) => b.id));
+      }
+    });
+  }
+
+  void _exitSelect() => setState(() {
+        _selecting = false;
+        _selected.clear();
+      });
+
+  /// 当前标签页里可见的书（全选要按当前标签算，不能跨库）
+  List<BookMeta> _visibleBooks(AppState app) => app.searchIn(
+        _tabs.index == 0 ? app.localBooks : app.onlineBooks,
+        _query,
+      );
+
   @override
   void dispose() {
     _tabs.dispose();
@@ -288,6 +333,116 @@ class _HomeScreenState extends State<HomeScreen> with SingleTickerProviderStateM
   }
 
   // ------------------------------------------------------------------
+  /// 批量选择时替换顶部搜索栏。
+  ///
+  /// 没有用 AppBar：首页本来就没有 AppBar（标题栏早前被移除过），
+  /// 选择栏直接占据同一块位置，进出选择模式时布局不跳动。
+  Widget _buildSelectionBar(AppState app, double topPad) {
+    final theme = Theme.of(context);
+    final visible = _visibleBooks(app);
+    final allSelected =
+        visible.isNotEmpty && _selected.length == visible.length;
+
+    return Container(
+      color: theme.colorScheme.surfaceContainerHighest.withValues(alpha: 0.6),
+      padding: EdgeInsets.fromLTRB(4, topPad + 4, 4, 4),
+      child: Column(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          Row(
+            children: [
+              IconButton(
+                tooltip: '退出批量管理',
+                icon: const Icon(Icons.close),
+                onPressed: _exitSelect,
+              ),
+              Text('已选 ${_selected.length} 本',
+                  style: const TextStyle(fontWeight: FontWeight.w600)),
+              const Spacer(),
+              TextButton(
+                onPressed: () => _selectAllToggle(visible),
+                child: Text(allSelected ? '取消全选' : '全选'),
+              ),
+            ],
+          ),
+          Row(
+            children: [
+              _BatchAction(
+                icon: Icons.favorite_border,
+                label: '收藏',
+                onTap: () => _batchFavorite(app, true),
+              ),
+              _BatchAction(
+                icon: Icons.favorite,
+                label: '取消收藏',
+                onTap: () => _batchFavorite(app, false),
+              ),
+              _BatchAction(
+                icon: Icons.delete_outline,
+                label: '删除',
+                danger: true,
+                onTap: () => _batchDelete(app),
+              ),
+            ],
+          ),
+        ],
+      ),
+    );
+  }
+
+  Future<void> _batchFavorite(AppState app, bool value) async {
+    final ids = _selected.toList();
+    if (ids.isEmpty) return;
+    await app.setFavoriteMany(ids, value);
+    if (!mounted) return;
+    _exitSelect();
+    ScaffoldMessenger.of(context)
+      ..hideCurrentSnackBar()
+      ..showSnackBar(SnackBar(
+        content:
+            Text(value ? '已收藏 ${ids.length} 本' : '已取消收藏 ${ids.length} 本'),
+        behavior: SnackBarBehavior.floating,
+      ));
+  }
+
+  Future<void> _batchDelete(AppState app) async {
+    final ids = _selected.toList();
+    if (ids.isEmpty) return;
+    final ok = await showDialog<bool>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        title: Text('删除 ${ids.length} 本？'),
+        content: const Text(
+          '书本身（网盘上的文件、手机上的源文件）不会被删除，'
+          '只从书架移除并清理它们的缓存。此操作无法撤销。',
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.of(ctx).pop(false),
+            child: const Text('取消'),
+          ),
+          FilledButton(
+            style: FilledButton.styleFrom(
+              backgroundColor: Theme.of(ctx).colorScheme.error,
+            ),
+            onPressed: () => Navigator.of(ctx).pop(true),
+            child: const Text('删除'),
+          ),
+        ],
+      ),
+    );
+    if (ok != true || !mounted) return;
+    final n = await app.deleteBooks(ids);
+    if (!mounted) return;
+    _exitSelect();
+    ScaffoldMessenger.of(context)
+      ..hideCurrentSnackBar()
+      ..showSnackBar(SnackBar(
+        content: Text('已删除 $n 本'),
+        behavior: SnackBarBehavior.floating,
+      ));
+  }
+
   @override
   Widget build(BuildContext context) {
     final app = context.watch<AppState>();
@@ -306,8 +461,11 @@ class _HomeScreenState extends State<HomeScreen> with SingleTickerProviderStateM
     return Scaffold(
       body: Column(
         children: [
-          // ── 顶部：搜索框 + 设置 ──
-          Container(
+          // ── 顶部：搜索框 + 设置（批量选择时换成选择栏）──
+          if (_selecting)
+            _buildSelectionBar(app, topPad)
+          else
+            Container(
             padding: EdgeInsets.fromLTRB(12, topPad + 8, 8, 6),
             child: Row(
               children: [
@@ -376,6 +534,10 @@ class _HomeScreenState extends State<HomeScreen> with SingleTickerProviderStateM
                   onOpen: _openBook,
                   onChanged: () => app.refreshBooks(),
                   onDelete: _confirmDelete,
+                  selecting: _selecting,
+                  selected: _selected,
+                  onStartSelect: _startSelect,
+                  onToggleSelect: _toggleSelect,
                   emptyHint: '本地库还是空的。\n点右下角「导入」添加压缩包、文件夹或图片。',
                 ),
                 // 在线库：NAS（WebDAV）
@@ -384,6 +546,10 @@ class _HomeScreenState extends State<HomeScreen> with SingleTickerProviderStateM
                   onOpen: _openBook,
                   onChanged: () => app.refreshBooks(),
                   onDelete: _confirmDelete,
+                  selecting: _selecting,
+                  selected: _selected,
+                  onStartSelect: _startSelect,
+                  onToggleSelect: _toggleSelect,
                   emptyHint: '在线库还是空的。\n'
                       '点右上角「设置」→ 添加 WebDAV 库，\n'
                       '连上网盘后选一个漫画根目录，\n'
@@ -506,6 +672,10 @@ class _BookGrid extends StatelessWidget {
     required this.onOpen,
     required this.onChanged,
     required this.onDelete,
+    required this.onStartSelect,
+    required this.onToggleSelect,
+    this.selecting = false,
+    this.selected = const {},
     this.emptyHint,
     this.emptyAction,
   });
@@ -514,6 +684,18 @@ class _BookGrid extends StatelessWidget {
   final Future<void> Function(BookMeta) onOpen;
   final Future<void> Function() onChanged;
   final Future<void> Function(BookMeta) onDelete;
+
+  /// 是否处于批量选择模式
+  final bool selecting;
+
+  /// 已选中的书 id
+  final Set<String> selected;
+
+  /// 长按进入批量选择
+  final void Function(BookMeta) onStartSelect;
+
+  /// 选择模式下点击切换选中
+  final void Function(BookMeta) onToggleSelect;
 
   /// 空列表时显示什么（本地库和在线库提示不同）
   final String? emptyHint;
@@ -574,6 +756,10 @@ class _BookGrid extends StatelessWidget {
           onOpen: onOpen,
           onChanged: onChanged,
           onDelete: onDelete,
+          selecting: selecting,
+          selected: selected.contains(book.id),
+          onStartSelect: onStartSelect,
+          onToggleSelect: onToggleSelect,
         );
       },
     );
@@ -599,28 +785,101 @@ class _BookCard extends StatelessWidget {
     required this.onOpen,
     required this.onChanged,
     required this.onDelete,
+    required this.onStartSelect,
+    required this.onToggleSelect,
+    this.selecting = false,
+    this.selected = false,
   });
 
   final BookMeta book;
   final Future<void> Function(BookMeta) onOpen;
   final Future<void> Function() onChanged;
   final Future<void> Function(BookMeta) onDelete;
+  final void Function(BookMeta) onStartSelect;
+  final void Function(BookMeta) onToggleSelect;
+  final bool selecting;
+  final bool selected;
 
   @override
   Widget build(BuildContext context) {
     final app = context.read<AppState>();
+    final theme = Theme.of(context);
 
     return InkWell(
       borderRadius: BorderRadius.circular(10),
-      onTap: () => onOpen(book),
-      onLongPress: () => _showActions(context, app),
+      // 选择模式下的点击行为必须变：否则用户点一下就跳进阅读器，
+      // 批量选择等于做不了。
+      onTap: () => selecting ? onToggleSelect(book) : onOpen(book),
+      onLongPress: () =>
+          selecting ? onToggleSelect(book) : onStartSelect(book),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
           Expanded(
-            child: ClipRRect(
-              borderRadius: BorderRadius.circular(10),
-              child: _Thumbnail(book: book, app: app),
+            child: Stack(
+              fit: StackFit.expand,
+              children: [
+                ClipRRect(
+                  borderRadius: BorderRadius.circular(10),
+                  child: _Thumbnail(book: book, app: app),
+                ),
+                // 单本操作入口（重命名 / 收藏 / 信息 / 删除）。
+                //
+                // 长按卡片已经被"批量选择"占用了，所以单本菜单必须
+                // 另给一个入口，否则重命名、删除单本这些老功能就没了。
+                // 只在非选择模式显示，避免和选中标记打架。
+                if (!selecting)
+                  Positioned(
+                    top: 2,
+                    left: 2,
+                    child: Material(
+                      color: Colors.black.withValues(alpha: 0.32),
+                      shape: const CircleBorder(),
+                      child: InkWell(
+                        customBorder: const CircleBorder(),
+                        onTap: () => _showActions(context, app),
+                        child: const Padding(
+                          padding: EdgeInsets.all(3),
+                          child: Icon(Icons.more_horiz,
+                              size: 16, color: Colors.white),
+                        ),
+                      ),
+                    ),
+                  ),
+                // 选中标记
+                if (selecting)
+                  Positioned(
+                    top: 4,
+                    right: 4,
+                    child: Container(
+                      decoration: BoxDecoration(
+                        color: selected
+                            ? theme.colorScheme.primary
+                            : Colors.black.withValues(alpha: 0.35),
+                        shape: BoxShape.circle,
+                        border: Border.all(color: Colors.white, width: 1.5),
+                      ),
+                      padding: const EdgeInsets.all(2),
+                      child: Icon(
+                        selected ? Icons.check : Icons.circle_outlined,
+                        size: 16,
+                        color: Colors.white,
+                      ),
+                    ),
+                  ),
+                // 未选中时整体压暗，选中状态一眼可辨
+                if (selecting && !selected)
+                  Positioned.fill(
+                    child: IgnorePointer(
+                      child: DecoratedBox(
+                        decoration: BoxDecoration(
+                          color: Colors.black.withValues(alpha: 0.35),
+                          borderRadius: BorderRadius.circular(10),
+                        ),
+                      ),
+                    ),
+                  ),
+              ],
             ),
           ),
           const SizedBox(height: 6),
@@ -820,4 +1079,40 @@ enum _ImportChoice {
         _ImportChoice.images => Icons.image_outlined,
         _ImportChoice.url => Icons.link,
       };
+}
+
+/// 批量选择栏里的一个动作按钮
+class _BatchAction extends StatelessWidget {
+  const _BatchAction({
+    required this.icon,
+    required this.label,
+    required this.onTap,
+    this.danger = false,
+  });
+
+  final IconData icon;
+  final String label;
+  final VoidCallback onTap;
+  final bool danger;
+
+  @override
+  Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+    final color = danger ? theme.colorScheme.error : theme.colorScheme.primary;
+    return Expanded(
+      child: InkWell(
+        onTap: onTap,
+        child: Padding(
+          padding: const EdgeInsets.symmetric(vertical: 8),
+          child: Column(
+            children: [
+              Icon(icon, size: 20, color: color),
+              const SizedBox(height: 2),
+              Text(label, style: TextStyle(fontSize: 11, color: color)),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
 }

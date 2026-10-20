@@ -374,6 +374,48 @@ class AppState extends ChangeNotifier {
     notifyListeners();
   }
 
+  /// 批量设置收藏状态。
+  ///
+  /// 一次只读一次写（走 `_prefs.upsertBooks`），而不是在循环里反复
+  /// `toggleFavorite` —— 那样每本都会重写整个书架 JSON，选 50 本
+  /// 就是 50 次全量写入，明显卡顿。
+  Future<void> setFavoriteMany(Iterable<String> bookIds, bool value) async {
+    final ids = bookIds.toSet();
+    if (ids.isEmpty) return;
+    final all = _prefs.loadBooks();
+    final updated = <BookMeta>[];
+    for (final b in all) {
+      if (ids.contains(b.id) && b.isFavorite != value) {
+        b.isFavorite = value;
+        updated.add(b);
+      }
+    }
+    if (updated.isEmpty) return;
+    await _prefs.saveBooks(all);
+    books = _prefs.loadBooks();
+    notifyListeners();
+  }
+
+  /// 批量删除。逐本删目录，但书架 JSON 只重读一次。
+  Future<int> deleteBooks(Iterable<String> bookIds) async {
+    final ids = bookIds.toList();
+    if (ids.isEmpty) return 0;
+    var removed = 0;
+    for (final id in ids) {
+      try {
+        await _prefs.deleteBook(id);
+        await _store?.deleteBook(id);
+        _coverQueue.remove(id);
+        removed++;
+      } catch (_) {
+        // 单本失败不影响其他
+      }
+    }
+    books = _prefs.loadBooks();
+    notifyListeners();
+    return removed;
+  }
+
   Future<void> refreshBooks() async {
     books = _prefs.loadBooks();
     notifyListeners();

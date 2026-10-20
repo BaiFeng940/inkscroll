@@ -213,6 +213,63 @@ A('从这里开始','ui','界面导览',
 </ul>
 `);
 
+// ── 图文教程 ───────────────────────────────────────────────────────────
+A('图文教程','walkthrough','从零开始：把网盘漫画导入并开始阅读',
+`
+<p>这一篇把整个流程串起来，每一步都配了截图。第一次用建议按顺序看一遍。</p>
+
+<h2>① 准备好网盘的 WebDAV 信息</h2>
+<p>去网盘的设置里开启 WebDAV，记下三样东西：<b>服务器地址、账号、WebDAV 密码</b>。</p>
+<div class="box warn"><b>注意</b>
+多数网盘的 WebDAV 密码要<b>单独生成</b>，不是你的登录密码。</div>
+
+<h2>② 打开设置 → 添加 WebDAV 库</h2>
+<p>首页右上角齿轮进设置，在「在线库」里点「添加 WebDAV 库」，填上面三样东西。</p>
+
+<figure>
+  <img src="../img/settings.png" alt="设置页">
+  <figcaption>设置页：阅读 / 屏幕刷新率 / 通过压缩包导入 / 存储 / 在线库 / 关于</figcaption>
+</figure>
+
+<h2>③ 浏览网盘，选中漫画根目录</h2>
+<p>连接成功后会列出网盘里的内容。点进你的「漫画根目录」。</p>
+
+<figure>
+  <img src="../img/browse.png" alt="浏览网盘目录">
+  <figcaption>点进漫画根目录后，底部会显示「会扫描这里的 N 个子文件夹」，再点右下角「添加为库」</figcaption>
+</figure>
+
+<h2>④ 等它导完</h2>
+<p>进度条会显示「正在导入 12/120：第12话.zip」。几十本到一百多本通常要<b>几分钟</b>。</p>
+<div class="box warn"><b>导入期间别切走</b>
+中途退出会中断这一批导入；已导入的书会保留，重新点「添加为库」会跳过已导入的继续。</div>
+
+<h2>⑤ 回到首页，切到「在线库」</h2>
+<p>能看到刚才导入的书，封面取自每本书的第一张图片。</p>
+
+<figure>
+  <img src="../img/library-cloud.png" alt="在线库书墙">
+  <figcaption>在线库：书挡来自网盘，封面自动取第一页</figcaption>
+</figure>
+
+<h2>⑥ 点开阅读</h2>
+
+<figure>
+  <img src="../img/reading.png" alt="阅读中">
+  <figcaption>直接从网盘压缩包里读出的页面 —— 翻到哪页才下载哪页</figcaption>
+</figure>
+
+<h2>⑦ 常用操作</h2>
+<table>
+  <tr><th>想做什么</th><th>怎么做</th></tr>
+  <tr><td>翻页</td><td>点屏幕左右两侧，或拖动</td></tr>
+  <tr><td>呼出菜单</td><td>点屏幕中间</td></tr>
+  <tr><td>快速翻很多页</td><td>拖动底部进度条（拖动时内容实时跟随）</td></tr>
+  <tr><td>批量管理</td><td>长按任意一本书进入选择模式，可全选、批量收藏、批量删除</td></tr>
+  <tr><td>改默认翻页方式</td><td>设置 → 阅读 → 默认翻页方式</td></tr>
+  <tr><td>看缓存占了多少</td><td>设置 → 存储 → 清理缓存</td></tr>
+</table>
+`);
 // ── 本地导入 ───────────────────────────────────────────────────────────
 A('本地导入','zip','导入压缩包',
 `
@@ -735,7 +792,13 @@ function render(){
     <footer>
       inkScroll · <a href="../index.html">官网</a> ·
       <a href="https://github.com/BaiFeng940/inkscroll">GitHub</a> ·
-      对应版本 0.6.0
+      对应版本 0.7.0
+      <div style="margin-top:14px;font-size:12px;opacity:.75">
+        征集中：想为 inkScroll 画一个图标？
+        投稿 <b>512×512</b> 的 PNG 到
+        <a href="mailto:jk968922@163.com">jk968922@163.com</a>，
+        采用后会在关于页署名。
+      </div>
     </footer>`;
 
   navEl.querySelectorAll('a').forEach(a => {
