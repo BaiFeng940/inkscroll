@@ -6,7 +6,7 @@
 library;
 
 /// 当前应用版本（不含 build number）
-const String kAppVersion = '0.8.0';
+const String kAppVersion = '0.9.0';
 
 // ---------------------------------------------------------------------------
 // 更新源
@@ -50,11 +50,17 @@ class UpdateSource {
 }
 
 /// 按优先级排列的更新源
+///
+/// ⚠️ GitCode 的接口和 GitHub 不一样，这里踩过坑：
+///   · `api.gitcode.com/api/v5/.../releases/latest` → **400**（该路径不存在）
+///   · 真正可用的是 `gitcode.com/api/v5/.../releases`，返回的是**数组**
+///   · `api.gitcode.com/api/v5/repos/{owner}/{repo}` 需要鉴权（401）
+/// 所以 GitCode 用后者，并且 `UpdateService` 必须能处理数组返回体。
 const List<UpdateSource> kUpdateSources = [
   UpdateSource(
     name: 'GitCode（国内镜像）',
     apiUrl:
-        'https://api.gitcode.com/api/v5/repos/$kGitCodeOwner/$kGitCodeRepo/releases/latest',
+        'https://gitcode.com/api/v5/repos/$kGitCodeOwner/$kGitCodeRepo/releases',
     fallbackPage: 'https://gitcode.com/$kGitCodeOwner/$kGitCodeRepo/releases',
   ),
   UpdateSource(
