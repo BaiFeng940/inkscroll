@@ -58,6 +58,32 @@ class SafFolderPlugin(
 
     override fun onMethodCall(call: MethodCall, result: MethodChannel.Result) {
         when (call.method) {
+            // 用系统默认浏览器打开一个外部链接（设置里的「帮助文档」）。
+            //
+            // 为什么不引入 url_launcher：这里只需要"打开一个 URL"这一个动作，
+            // 为它加一个第三方依赖（连带版本解析与新平台实现）不划算。
+            // ★ 必须判断 resolveActivity —— 某些精简 ROM 上没有浏览器时，
+            //   直接 startActivity 会抛 ActivityNotFoundException 把应用带崩。
+            "openUrl" -> {
+                val url = call.argument<String>("url")
+                if (url.isNullOrEmpty()) {
+                    result.error("bad_args", "url 不能为空", null)
+                    return
+                }
+                try {
+                    val intent = Intent(Intent.ACTION_VIEW, Uri.parse(url)).apply {
+                        addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+                    }
+                    if (intent.resolveActivity(activity.packageManager) == null) {
+                        result.error("no_handler", "没有可打开该链接的应用", null)
+                        return
+                    }
+                    activity.startActivity(intent)
+                    result.success(true)
+                } catch (e: Exception) {
+                    result.error("open_failed", e.message ?: "$e", null)
+                }
+            }
             "pickAndCopy" -> {
                 if (pendingResult != null) {
                     result.error("busy", "已有一次选择正在进行", null)

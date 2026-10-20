@@ -18,6 +18,7 @@ import 'package:provider/provider.dart';
 import '../data/webdav/webdav_connection.dart';
 import '../core/errors.dart';
 import '../data/models/reader_settings.dart';
+import 'external_link.dart';
 import '../state/app_state.dart';
 import 'webdav_browse_screen.dart';
 
@@ -383,10 +384,27 @@ class _SettingsScreenState extends State<SettingsScreen> {
 
           // ── 关于 ──
           _SectionHeader('关于'),
+          ListTile(
+            leading: const Icon(Icons.menu_book_outlined),
+            title: const Text('帮助文档'),
+            subtitle: const Text(
+              '完整使用教程：导入、网盘连接、合集识别、阅读设置、'
+              '远程访问与常见问题',
+              maxLines: 2,
+              overflow: TextOverflow.ellipsis,
+            ),
+            trailing: const Icon(Icons.open_in_new, size: 18),
+            onTap: () async {
+              final ok = await openHelpDocs();
+              if (!ok && context.mounted) {
+                _snack('没能打开浏览器。可以手动访问：$kHelpUrl', isError: true);
+              }
+            },
+          ),
           const ListTile(
             leading: Icon(Icons.info_outline),
             title: Text('inkScroll'),
-            subtitle: Text('版本 0.5.0 · 本地与网盘漫画阅读器\n'
+            subtitle: Text('版本 0.6.0 · 本地与网盘漫画阅读器\n'
                 '不收集任何数据；只有你主动连接网盘时才有网络请求'),
             isThreeLine: true,
           ),

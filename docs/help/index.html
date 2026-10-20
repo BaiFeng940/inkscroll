@@ -1,0 +1,758 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>帮助中心 - inkScroll</title>
+<style>
+  :root{
+    --bg:#fff; --side:#f7f8fa; --text:#1f2329; --muted:#646a73;
+    --line:#e5e6eb; --accent:#3355dd; --accent-bg:#eef1ff;
+    --code-bg:#f3f4f6; --warn-bg:#fff8e6; --warn-line:#f5c451;
+    --ok-bg:#eefaf1; --ok-line:#4cc38a;
+    --side-w:270px; --head-h:56px;
+  }
+  @media (prefers-color-scheme: dark){
+    :root{
+      --bg:#15171c; --side:#1b1e25; --text:#e6e8ee; --muted:#9aa3b2;
+      --line:#2a2f39; --accent:#7c9cff; --accent-bg:#22283a;
+      --code-bg:#20242d; --warn-bg:#2c2718; --warn-line:#8a6d1f;
+      --ok-bg:#17281e; --ok-line:#2f7a52;
+    }
+  }
+  *{box-sizing:border-box}
+  html,body{margin:0;padding:0;background:var(--bg);color:var(--text)}
+  body{
+    font:15px/1.75 -apple-system,BlinkMacSystemFont,"Segoe UI","PingFang SC",
+         "Hiragino Sans GB","Microsoft YaHei",sans-serif;
+    -webkit-font-smoothing:antialiased;
+  }
+  a{color:var(--accent);text-decoration:none}
+  a:hover{text-decoration:underline}
+
+  /* ── 顶栏 ── */
+  header{
+    position:fixed;top:0;left:0;right:0;height:var(--head-h);z-index:20;
+    display:flex;align-items:center;gap:14px;padding:0 20px;
+    background:var(--bg);border-bottom:1px solid var(--line);
+  }
+  header .logo{font-weight:700;font-size:16px;letter-spacing:-.2px}
+  header .logo span{color:var(--accent)}
+  header .hint{color:var(--muted);font-size:13px}
+  header .right{margin-left:auto;display:flex;gap:16px;font-size:13px}
+  #menuBtn{display:none;background:none;border:0;color:var(--text);font-size:20px;cursor:pointer}
+
+  /* ── 左侧导航 ── */
+  nav{
+    position:fixed;top:var(--head-h);left:0;bottom:0;width:var(--side-w);
+    overflow-y:auto;background:var(--side);border-right:1px solid var(--line);
+    padding:16px 0 40px;
+  }
+  nav .grp{
+    padding:14px 20px 6px;font-size:12px;font-weight:700;letter-spacing:.04em;
+    color:var(--muted);text-transform:none;
+  }
+  nav a{
+    display:block;padding:7px 20px 7px 24px;font-size:14px;color:var(--text);
+    border-left:2px solid transparent;line-height:1.5;
+  }
+  nav a:hover{background:var(--accent-bg);text-decoration:none}
+  nav a.active{
+    color:var(--accent);background:var(--accent-bg);
+    border-left-color:var(--accent);font-weight:600;
+  }
+
+  /* ── 正文 ── */
+  main{
+    margin-left:var(--side-w);padding:calc(var(--head-h) + 32px) 40px 100px;
+    max-width:900px;
+  }
+  main h1{font-size:27px;line-height:1.4;margin:0 0 6px;letter-spacing:-.3px}
+  main .meta{color:var(--muted);font-size:13px;margin-bottom:28px}
+  main h2{font-size:19px;margin:34px 0 10px;padding-top:16px;border-top:1px solid var(--line)}
+  main h3{font-size:16px;margin:22px 0 8px}
+  main p{margin:12px 0}
+  main ul,main ol{padding-left:22px;margin:10px 0}
+  main li{margin:6px 0}
+  code{
+    background:var(--code-bg);border-radius:4px;padding:1.5px 6px;font-size:13px;
+    font-family:ui-monospace,SFMono-Regular,Consolas,monospace;
+  }
+  pre{
+    background:var(--code-bg);border-radius:8px;padding:14px 16px;overflow:auto;
+    font-size:13px;line-height:1.6;
+    font-family:ui-monospace,SFMono-Regular,Consolas,monospace;
+  }
+  pre code{background:none;padding:0}
+  table{border-collapse:collapse;width:100%;margin:16px 0;font-size:14px}
+  th,td{border:1px solid var(--line);padding:9px 12px;text-align:left;vertical-align:top}
+  th{background:var(--side);font-weight:600}
+  .box{
+    border-radius:8px;padding:12px 16px;margin:16px 0;font-size:14px;
+    border-left:3px solid var(--accent);background:var(--accent-bg);
+  }
+  .box.warn{border-left-color:var(--warn-line);background:var(--warn-bg)}
+  .box.ok{border-left-color:var(--ok-line);background:var(--ok-bg)}
+  .box b{display:block;margin-bottom:4px}
+  figure{margin:18px 0;text-align:center}
+  figure img{max-width:320px;width:100%;border-radius:10px;border:1px solid var(--line)}
+  figcaption{color:var(--muted);font-size:12.5px;margin-top:8px}
+  footer{
+    margin-top:48px;padding-top:18px;border-top:1px solid var(--line);
+    color:var(--muted);font-size:13px;
+  }
+
+  @media (max-width:900px){
+    nav{transform:translateX(-100%);transition:transform .2s;box-shadow:0 0 30px rgba(0,0,0,.2)}
+    body.open nav{transform:none}
+    main{margin-left:0;padding-left:20px;padding-right:20px}
+    #menuBtn{display:block}
+    header .hint{display:none}
+  }
+</style>
+</head>
+<body>
+
+<header>
+  <button id="menuBtn" aria-label="菜单">☰</button>
+  <div class="logo">ink<span>Scroll</span> 帮助中心</div>
+  <div class="hint">本地与网盘漫画阅读器</div>
+  <div class="right">
+    <a href="../index.html">官网</a>
+    <a href="../tutorial.html">图文教程</a>
+    <a href="https://github.com/BaiFeng940/inkscroll">GitHub</a>
+  </div>
+</header>
+
+<nav id="nav"></nav>
+<main id="main"></main>
+
+<script>
+// ══════════════════════════════════════════════════════════════════════
+// 文章数据：group = 左侧分组，id = 路由片段
+// ══════════════════════════════════════════════════════════════════════
+const ARTICLES = [];
+
+function A(group, id, title, html) { ARTICLES.push({group, id, title, html}); }
+
+// ── 从这里开始 ─────────────────────────────────────────────────────────
+A('从这里开始','intro','inkScroll 是什么',
+`
+<p>inkScroll 是一个 <b>本地与网盘漫画阅读器</b>，Android 优先、兼容 iOS。</p>
+
+<h2>它能做什么</h2>
+<table>
+  <tr><th>能力</th><th>说明</th></tr>
+  <tr><td>本地导入</td><td>压缩包（zip / cbz / tar）、文件夹、散图</td></tr>
+  <tr><td>网盘在线看</td><td>通过 WebDAV 直连 NAS 或网盘，不用先下载</td></tr>
+  <tr><td>压缩包在线读</td><td>网盘上的 zip 也能直接翻页，只下载当前那一页</td></tr>
+  <tr><td>两种翻页</td><td>左右翻页 / 上下滑动（长条图）</td></tr>
+  <tr><td>高刷新率</td><td>针对 120Hz 屏幕做了适配</td></tr>
+</table>
+
+<h2>它不做什么</h2>
+<ul>
+  <li><b>不收集任何数据</b>：只有你主动连接网盘时才会有网络请求</li>
+  <li>不做在线阅读商城、不做社交、不需要注册账号</li>
+  <li>不支持的格式：rar / 7z、PDF、DOCX（详见「支持的格式」）</li>
+</ul>
+
+<div class="box"><b>一句话</b>
+你的漫画在哪，它就去哪读 —— 本地文件按需解压，网盘文件按需下载，两者都不整包搬运。</div>
+`);
+
+A('从这里开始','install','安装与首次启动',
+`
+<p>安装包发布在 GitHub Releases：</p>
+<p><a href="https://github.com/BaiFeng940/inkscroll/releases">https://github.com/BaiFeng940/inkscroll/releases</a></p>
+
+<h2>选哪个安装包</h2>
+<table>
+  <tr><th>文件名后缀</th><th>适用</th></tr>
+  <tr><td><code>arm64-v8a</code></td><td><b>2016 年后绝大多数手机，选这个</b></td></tr>
+  <tr><td><code>armeabi-v7a</code></td><td>较老的 32 位设备</td></tr>
+  <tr><td><code>x86_64</code></td><td>模拟器、部分 Chromebook</td></tr>
+  <tr><td><code>universal</code></td><td>不确定架构时用（体积约 3 倍）</td></tr>
+</table>
+
+<p>不确定自己是哪种，可以先在手机「设置 → 关于手机 → 处理器」里看，或者直接下 <code>universal</code>，一定能装。</p>
+
+<h2>首次启动</h2>
+<ol>
+  <li>安装后打开，会看到两个标签：<b>本地库</b> 与 <b>在线库</b></li>
+  <li>本地库右下角有「导入」按钮</li>
+  <li>右上角齿轮进设置（网盘连接、翻页方式、缓存等都在这里）</li>
+</ol>
+
+<div class="box warn"><b>升级提醒</b>
+如果从更早的版本升级提示「签名不一致」，需要先卸载旧版再安装。
+卸载会清空书架与已添加的网盘连接，重新添加一次即可。</div>
+`);
+
+A('从这里开始','ui','界面导览',
+`
+<h2>首页</h2>
+<ul>
+  <li><b>搜索框</b>：在<b>当前标签</b>内搜索书名</li>
+  <li><b>齿轮</b>：进入设置</li>
+  <li><b>本地库</b>：从手机导入的漫画</li>
+  <li><b>在线库</b>：从网盘 / NAS 添加的漫画</li>
+  <li><b>导入按钮</b>：只在本地库显示</li>
+</ul>
+
+<h2>书架卡片</h2>
+<p>每张卡片的封面取自<b>第一张图片</b>；点开就是阅读。</p>
+<p>长按卡片（或点卡片上的菜单）可以：重命名、收藏、调整页面顺序、删除。</p>
+
+<h2>阅读界面</h2>
+<ul>
+  <li>点屏幕<b>中间</b>：呼出 / 收起菜单</li>
+  <li>点屏幕<b>左右两侧</b>：上一页 / 下一页</li>
+  <li>底部进度条：拖动可实时预览并跳转</li>
+  <li>双击中间：缩放</li>
+</ul>
+`);
+
+// ── 本地导入 ───────────────────────────────────────────────────────────
+A('本地导入','zip','导入压缩包',
+`
+<p>这是最常用的导入方式。点首页右下角「导入」→ 选择压缩包。</p>
+
+<h2>支持的格式</h2>
+<table>
+  <tr><th>类型</th><th>支持</th></tr>
+  <tr><td>压缩包</td><td><code>.zip</code> / <code>.cbz</code> / <code>.tar</code></td></tr>
+  <tr><td>包内图片</td><td>JPG / PNG / GIF / WebP / BMP / AVIF</td></tr>
+  <tr><td>不支持</td><td>rar、7z、tar.gz（需先转成 zip）</td></tr>
+</table>
+
+<div class="box"><b>不会解压整个包</b>
+导入时只读取压缩包的<b>中央目录</b>（几百字节），翻到哪一页才解压哪一页并缓存。
+所以几 GB 的包也能秒开，也不会瞬间占满手机空间。</div>
+
+<h2>加密压缩包</h2>
+<p>支持带密码的 zip。导入时会提示输入密码，输入后只在本机使用、不联网。</p>
+`);
+
+A('本地导入','folder','导入文件夹',
+`
+<p>「导入」→ 选择文件夹。</p>
+
+<p>因为采用了 Android 的 SAF 选择器，<b>不需要存储权限</b>，系统会直接把选中目录的读取权限授给应用。</p>
+
+<h2>注意</h2>
+<ul>
+  <li>导入的是<b>目录内所有图片</b>（含子目录）</li>
+  <li>图片按文件名<b>自然序</b>排列（<code>1, 2, 10</code> 而不是 <code>1, 10, 2</code>）</li>
+  <li>顺序不对可以在书架菜单里手动调整</li>
+</ul>
+
+<div class="box warn"><b>不要选太大的一级目录</b>
+如果选中「内部存储」根目录，会扫描到大量无关图片。建议选到「漫画」这一层。</div>
+`);
+
+A('本地导入','loose','导入散图',
+`
+<p>「导入」→ 选择图片，可以多选。</p>
+<p>适合临时看几张图，或者图片存在相册里而不是文件夹中的情况。</p>
+
+<div class="box warn"><b>隐私</b>
+inkScroll 会把选中的图片<b>复制</b>到应用私有目录，所以删掉原图也能继续看。
+这些副本不会出现在系统相册里。</div>
+`);
+
+A('本地导入','order','调整页面顺序',
+`
+<p>如果自动排序不符合预期，可以在书架里手动调整。</p>
+<ol>
+  <li>书架卡片菜单 → <b>调整页面顺序</b></li>
+  <li>拖动或上下移动条目</li>
+  <li>保存</li>
+</ol>
+
+<h2>自动排序规则</h2>
+<p>采用<b>自然序</b>，即把连续数字当成一个整体比较：</p>
+<pre><code>1.jpg, 2.jpg, 10.jpg        → 1, 2, 10  ✅
+第1话, 第2话, 第10话          → 1, 2, 10  ✅</code></pre>
+<p>如果文件名里数字位置很乱（如 <code>a2b10</code>），自动排序可能不理想，手动调整即可。</p>
+`);
+
+// ── 网盘 / WebDAV ──────────────────────────────────────────────────────
+A('网盘 / WebDAV','add','添加 WebDAV 库',
+`
+<p>网盘漫画不下载到手机，直接在线上看。</p>
+
+<h2>前置条件</h2>
+<table>
+  <tr><th>需要</th><th>说明</th></tr>
+  <tr><td>支持 WebDAV 的网盘</td><td>私有云：飞牛 / 群晖 / 威联通 / TrueNAS；商用：123云盘 / 坚果云 / Nextcloud / Alist</td></tr>
+  <tr><td>WebDAV 地址</td><td>形如 <code>https://webdav.123pan.cn/webdav</code></td></tr>
+  <tr><td>账号与密码</td><td>多数网盘要<b>单独生成</b> WebDAV 密码，不是登录密码</td></tr>
+</table>
+
+<h2>步骤</h2>
+<ol>
+  <li>设置 → 在线库 → <b>添加 WebDAV 库</b></li>
+  <li>填服务器地址、账号、密码</li>
+  <li>若网盘用<b>自签名证书</b>（家用 NAS 常见），打开「允许自签名证书」</li>
+  <li>点 <b>测试并连接</b></li>
+</ol>
+
+<div class="box"><b>地址怎么填</b>
+含协议完整填 <code>https://webdav.123pan.cn/webdav</code> 最稳；
+只填 <code>域名:端口</code> 也行，http/https 会自动识别。</div>
+
+<div class="box warn"><b>百度网盘 / 阿里云盘</b>
+这两家<b>本身不提供 WebDAV</b>，需要先用 <b>Alist</b> 等网关挂载并转成 WebDAV，
+再把 Alist 的地址填进来。inkScroll 不限服务商，只要是标准 WebDAV 就能连。</div>
+`);
+
+A('网盘 / WebDAV','layout','整理漫画目录',
+`
+<p>导入时 <b>选中的目录 = 书架根目录</b>，它下面的每一个单位都会变成一本书。</p>
+
+<h2>方式 A：一话一个文件夹</h2>
+<pre><code>漫画根目录/
+├── 第01话/  1.jpg  2.jpg  3.jpg …
+├── 第02话/  1.jpg  2.jpg  3.jpg …
+└── 第03话/  1.jpg  2.jpg  3.jpg …</code></pre>
+
+<h2>方式 B：一话一个压缩包（推荐）</h2>
+<pre><code>漫画根目录/
+├── 第01话.zip
+├── 第02话.zip
+└── 第03话.zip</code></pre>
+
+<h2>方式 C：合集嵌套（需要「识别合集结构」开启）</h2>
+<pre><code>漫画根目录/
+└── 某某合集/          ← 这一层只是分类，没有图片
+    ├── 第一话/
+    └── 第二话/</code></pre>
+
+<div class="box warn"><b>不要选太上层</b>
+选到网盘根目录会把几百个不相干的目录也扫进来，导入既慢又乱。选到「漫画」这一层就好。</div>
+`);
+
+A('网盘 / WebDAV','import','导入并等待',
+`
+<ol>
+  <li>在目录列表里点进「漫画根目录」</li>
+  <li>底部会显示「会扫描这里的 N 个子文件夹」</li>
+  <li>点右下角 <b>添加为库</b></li>
+  <li>等待扫描 + 导入完成</li>
+</ol>
+
+<h2>要等多久</h2>
+<p>进度条显示「正在导入 12/120：第12话.zip」。几十本到一百多本通常需要<b>几分钟</b>。</p>
+
+<table>
+  <tr><th>阶段</th><th>在做什么</th></tr>
+  <tr><td>扫描目录</td><td>列出每个子目录内容（并行 5 路）</td></tr>
+  <tr><td>测量尺寸</td><td>每本抽几张图，只下载图片头部几十 KB</td></tr>
+</table>
+
+<div class="box warn"><b>导入期间请保持应用在前台</b>
+切走或息屏会<b>中断</b>这一批导入。已导入的书会保留；
+重新点「添加为库」会<b>跳过已在库里的</b>，继续导剩下的。</div>
+
+<div class="box ok"><b>怎么知道结果</b>
+导入结束后，设置页在线库下方会显示一行「上次导入：…」，
+包含扫描到多少、成功多少、失败多少；失败时会给出第一条原因。</div>
+`);
+
+A('网盘 / WebDAV','collection','合集结构识别',
+`
+<p><b>设置 → 在线库 → 识别「合集」结构（默认开启）</b></p>
+
+<p>现实里的收藏常常多一层分类：</p>
+<pre><code>漫画根目录/某某合集/第一话/</code></pre>
+<p>这一层「某某合集」自己没有图片。如果只扫一层，整个合集会<b>被漏掉</b>（表现为导入 0 本）。</p>
+
+<h2>规则</h2>
+<table>
+  <tr><th>子目录的情况</th><th>处理</th></tr>
+  <tr><td>自己有图片或压缩包</td><td>直接成为一本书</td></tr>
+  <tr><td>自己什么都没有，但下面有</td><td><b>再往下找一层</b>（每层最多展开 40 个）</td></tr>
+</table>
+
+<p>只多探<b>一层</b>是刻意的：更深的层级通常不是「一话」，继续递归既慢又容易把不相干目录也导进来。</p>
+
+<div class="box"><b>什么时候该关掉</b>
+如果你的目录结构非常规整（根目录下直接就是一话一话），关掉能少一次探测、扫描更快。</div>
+`);
+
+A('网盘 / WebDAV','providers','支持的网盘与格式',
+`
+<h2 id="providers">推荐清单</h2>
+<table>
+  <tr><th>网盘</th><th>WebDAV</th><th>备注</th></tr>
+  <tr><td>飞牛 fnOS</td><td>✅ 自带</td><td>设置 → 文件共享协议 → WebDAV，端口 5005/5006</td></tr>
+  <tr><td>群晖 / 威联通</td><td>✅ 自带</td><td>需在套件里开启</td></tr>
+  <tr><td>123云盘</td><td>✅ 会员功能</td><td>需在设置里生成独立的 WebDAV 密码</td></tr>
+  <tr><td>坚果云</td><td>✅</td><td>需生成应用密码</td></tr>
+  <tr><td>Nextcloud</td><td>✅</td><td><code>/remote.php/dav/files/用户名/</code></td></tr>
+  <tr><td>Alist</td><td>✅</td><td>可作为百度网盘 / 阿里云盘的中转</td></tr>
+  <tr><td>百度网盘 / 阿里云盘</td><td>❌ 无原生</td><td>需经 Alist 转成 WebDAV</td></tr>
+</table>
+
+<h2>网盘上支持的阅读形式</h2>
+<table>
+  <tr><th>形式</th><th>支持</th></tr>
+  <tr><td>图片文件夹</td><td>✅</td></tr>
+  <tr><td>zip / cbz 压缩包</td><td>✅ 在线读取，不下载整包</td></tr>
+  <tr><td>tar.gz</td><td>❌ 必须从头顺序解压，无法随机取单片</td></tr>
+</table>
+`);
+
+// ── 阅读 ───────────────────────────────────────────────────────────────
+A('阅读','mode','翻页方式',
+`
+<p><b>设置 → 阅读 → 默认翻页方式</b></p>
+
+<table>
+  <tr><th>选项</th><th>行为</th><th>适合</th></tr>
+  <tr><td><b>自动</b>（默认）</td><td>长条图用上下滑动，普通页用左右翻页</td><td>绝大多数情况</td></tr>
+  <tr><td>左右翻页</td><td>一页一屏，拖动或点击两侧翻页</td><td>单页漫画</td></tr>
+  <tr><td>上下滑动</td><td>多页无缝拼成一条长页</td><td>Webtoon / 条漫</td></tr>
+</table>
+
+<div class="box"><b>只影响还没读过的书</b>
+读过的书会记住你上次用的方式，不会因为改了这个设置而变。</div>
+
+<p>阅读时也能随时切换：点屏幕中间呼出菜单 → 切换模式。位置会自动换算到同一处。</p>
+`);
+
+A('阅读','progress','进度条与跳转',
+`
+<h2>拖动进度条</h2>
+<p>拖动时内容会<b>实时跟随</b>，松手才精确落位。所以你能直接看出会停在哪一页，而不是靠猜。</p>
+
+<h2>快速连点翻页</h2>
+<p>对着屏幕左右边缘连续快速点击，会<b>一页一页稳定前进</b>，不会丢事件。</p>
+
+<div class="box"><b>为什么双击缩放只在中间区域</b>
+对着边缘连点，落点相同、间隔又短，从手势上和双击一模一样。
+为了不把"连点翻页"误判成"双击缩放"，侧边区不做双击仲裁 —— 缩放只在中间区域生效。</div>
+
+<h2>阅读进度</h2>
+<p>退出时会自动保存进度；下次打开这本书会回到上次的位置。</p>
+`);
+
+A('阅读','refresh','高刷新率',
+`
+<p>inkScroll 会主动向系统申请高刷新率，但 Android 默认只给<b>系统允许列表</b>里的应用开高刷。</p>
+
+<h2>需要你手动把本应用加进去</h2>
+<p>系统设置 → 显示与亮度 → 屏幕刷新率，找到类似
+<b>「使用高刷新率的应用」</b>（有的机型叫「高刷新率应用列表」或「选择应用」），
+把 inkScroll 打开。</p>
+
+<table>
+  <tr><th>品牌</th><th>大致路径</th></tr>
+  <tr><td>vivo / iQOO</td><td>设置 → 显示与亮度 → 屏幕刷新率 → 使用高刷新率的应用</td></tr>
+  <tr><td>OPPO / 一加</td><td>设置 → 显示与亮度 → 屏幕刷新率 → 选择应用</td></tr>
+  <tr><td>小米 / Redmi</td><td>设置 → 显示 → 高刷新率 → 应用列表</td></tr>
+  <tr><td>华为 / 荣耀</td><td>设置 → 显示与亮度 → 屏幕刷新率</td></tr>
+</table>
+
+<div class="box warn"><b>找不到这个选项也不影响使用</b>
+不动它照样能正常看书，只是滑动可能停在 60Hz。系统不允许应用自己绕过这个限制。</div>
+`);
+
+A('阅读','text','文字与背景',
+`
+<p>TXT 等文字内容可以调整排版（图片漫画不受影响）。</p>
+
+<table>
+  <tr><th>设置项</th><th>说明</th></tr>
+  <tr><td>背景</td><td>白 / 米黄 / 灰 / 黑</td></tr>
+  <tr><td>字号</td><td>建议 16~20</td></tr>
+  <tr><td>行距</td><td>建议 1.6~1.9</td></tr>
+  <tr><td>边距</td><td>屏幕窄可以调小</td></tr>
+  <tr><td>常亮</td><td>阅读时不息屏</td></tr>
+</table>
+`);
+
+// ── 远程访问 ───────────────────────────────────────────────────────────
+A('远程访问','judge','判断有没有公网 IP',
+`
+<p>在家连 NAS 只要填局域网地址（如 <code>https://192.168.1.10:5006</code>）。
+出门后手机连的是移动网络，就访问不到内网地址了。</p>
+
+<h2>先判断：你家宽带有没有公网 IP</h2>
+<p>在能上网的电脑上搜「IP」，把查到的地址和<b>主路由器的 WAN 口地址</b>对比：</p>
+
+<table>
+  <tr><th>查到的地址</th><th>含义</th><th>能否直接外网访问</th></tr>
+  <tr><td>和路由器 WAN 一致，形如 <code>120.x.x.x</code></td><td>有公网 IPv4</td><td>✅ 走端口映射</td></tr>
+  <tr><td><code>100.64.x.x</code> ~ <code>100.127.x.x</code></td><td>运营商 <b>CGNAT</b> 大内网</td><td>❌ 端口映射无效，只能隧道</td></tr>
+  <tr><td><code>10.x</code> / <code>172.16~31.x</code> / <code>192.168.x</code></td><td>私有地址（可能光猫又做了一层 NAT）</td><td>❌ 需先解决多层 NAT</td></tr>
+</table>
+`);
+
+A('远程访问','port','端口映射 + DDNS',
+`
+<p>适用于<b>有公网 IP</b> 的情况。</p>
+
+<ol>
+  <li>登录<b>主路由器</b>后台，找「端口转发 / 虚拟服务器 / 端口映射 / 虚拟主机」</li>
+  <li>加一条规则：
+    <table>
+      <tr><th>字段</th><th>填什么</th></tr>
+      <tr><td>外部端口</td><td>自己挑一个不常用的，如 <code>50068</code></td></tr>
+      <tr><td>内部 IP</td><td>NAS 的局域网地址，如 <code>192.168.1.10</code></td></tr>
+      <tr><td>内部端口</td><td>WebDAV 端口，飞牛是 <code>5006</code></td></tr>
+      <tr><td>协议</td><td>TCP</td></tr>
+    </table>
+  </li>
+  <li>在 NAS 上开 <b>DDNS</b>（飞牛自带：设置 → 网络 → DDNS），拿到固定域名</li>
+  <li>在 App 里再添一条连接：<code>https://你的域名:50068</code>，与局域网那条并存</li>
+</ol>
+`);
+
+A('远程访问','double-nat','双层 NAT 怎么办',
+`
+<p>如果光猫也做了拨号（路由器 WAN 口拿到的是 <code>192.168.x.x</code>），
+只在路由器上做映射不够 —— 外面的包先到光猫就被丢了。</p>
+
+<h2>三种解法</h2>
+<table>
+  <tr><th>方案</th><th>做法</th><th>评价</th></tr>
+  <tr><td>光猫设 DMZ</td><td>DMZ 主机指向路由器 WAN IP</td><td>最省事</td></tr>
+  <tr><td>两处都映射</td><td>光猫和路由器各加一条同样的规则</td><td>稍麻烦，但明确</td></tr>
+  <tr><td>光猫改桥接</td><td>让路由器拨号，只剩一层 NAT</td><td>最干净，但可能影响 IPTV / 固话</td></tr>
+</table>
+
+<div class="box warn"><b>DMZ 的风险</b>
+DMZ 会把<b>所有</b>入站端口转给一台机器。只在路由器上做、且只转必要端口更安全。</div>
+`);
+
+A('远程访问','tunnel','内网穿透隧道',
+`
+<p>适用于<b>没有公网 IP</b>（CGNAT / 纯内网 / 多层 NAT）的情况。</p>
+
+<p>思路反过来：让 <b>NAS 主动向外建立连接</b>，外面的设备连到中转服务器。
+常见工具：chmlfrp / SakuraFrp / frp / Cloudflare Tunnel。</p>
+
+<h2>三个关键选项</h2>
+<table>
+  <tr><th>选项</th><th>怎么填</th><th>为什么</th></tr>
+  <tr><td>端口类型</td><td><b>TCP</b></td><td>原始字节转发，NAS 的 TLS 端到端保留；
+      选 HTTP/HTTPS 还会被要求备案域名</td></tr>
+  <tr><td>本地端口</td><td><code>5006</code></td><td>填成网页端口 <code>5666</code> 会连到管理界面</td></tr>
+  <tr><td>加密 / 压缩</td><td>都<b>关闭</b></td><td>流量本来就被 TLS 加密；图片已压缩，再压无收益</td></tr>
+</table>
+
+<p>隧道建立后会给你一个地址，形如 <code>xxx.example.com:12345</code>。
+App 里填 <code>https://xxx.example.com:12345</code>，打开「允许自签名证书」即可。</p>
+
+<div class="box ok"><b>为什么推荐隧道</b>
+它同时绕开：没有公网 IP、多层 NAT、运营商封端口、公网 IP 会变。
+代价是速度受中转服务器限制，且流量经过第三方（但内容仍是你的 TLS 加密）。</div>
+
+<div class="box warn"><b>安全提醒</b>
+把 NAS 暴露到公网有风险，请务必：
+① 建一个<b>只读</b>的 WebDAV 账号专门给阅读器；
+② 用非标准端口；③ 保持 HTTPS，不要退回 http。</div>
+`);
+
+// ── 存储与隐私 ─────────────────────────────────────────────────────────
+A('存储与隐私','cache','缓存管理',
+`
+<p><b>设置 → 存储 → 清理缓存</b></p>
+
+<p>会显示当前缓存占用，并按三类展示：</p>
+
+<table>
+  <tr><th>类别</th><th>内容</th><th>删了会怎样</th></tr>
+  <tr><td>网盘页</td><td>从网盘拉下来的页</td><td>下次阅读重新下载</td></tr>
+  <tr><td>解压产物</td><td>本地压缩包解压出来的图</td><td>回退到直接从 zip 读</td></tr>
+  <tr><td>封面</td><td>封面缩略图</td><td>自动重新生成</td></tr>
+</table>
+
+<div class="box ok"><b>只清缓存，不动数据</b>
+书架、阅读进度、网盘连接与密码都<b>不会</b>被删除 ——
+清理后已添加的网盘仍然可用，不需要重新配置。</div>
+`);
+
+A('存储与隐私','privacy','隐私说明',
+`
+<h2>不收集任何数据</h2>
+<p>inkScroll 没有账号体系，不做行为统计，不上传任何内容。</p>
+
+<h2>什么时候会联网</h2>
+<ul>
+  <li>只有你<b>主动连接网盘</b>时（WebDAV 请求）</li>
+  <li>其他时候完全离线</li>
+</ul>
+
+<h2>漫画不会被系统相册看到</h2>
+<p>导入的图片、解压产物、缓存全部存放在应用私有目录，
+并写入了 <code>.nomedia</code> 标记，<b>不会出现在系统相册</b>里。</p>
+
+<h2>密码怎么存的</h2>
+<div class="box warn"><b>是混淆，不是加密</b>
+WebDAV 密码以 XOR + Base64 形式存于应用私有目录的 SharedPreferences 中。
+这只能防止被肉眼直接看到，<b>不能抵御有 root 权限的攻击者</b>。</div>
+<p>这也是为什么反复建议：<b>给阅读器单独建一个只读账号</b>。
+即使密码泄露，对方也读不到你指定的那个目录以外的东西。</p>
+`);
+
+A('存储与隐私','settings','设置项一览',
+`
+<table>
+  <tr><th>分组</th><th>设置项</th><th>作用</th></tr>
+  <tr><td rowspan="2">外观</td><td>主题</td><td>跟随系统 / 浅色 / 深色</td></tr>
+  <tr><td>阅读 → 默认翻页方式</td><td>自动 / 左右翻页 / 上下滑动</td></tr>
+  <tr><td>屏幕刷新率</td><td>说明文字</td><td>高刷需要在系统设置里加白名单</td></tr>
+  <tr><td>通过压缩包导入</td><td>说明文字</td><td>支持格式、网盘压缩包、需要耐心等待</td></tr>
+  <tr><td>存储</td><td>清理缓存</td><td>只清可重建的数据</td></tr>
+  <tr><td rowspan="4">在线库</td><td>连接列表</td><td>显示已添加的网盘，可删除</td></tr>
+  <tr><td>识别「合集」结构</td><td>默认开启，多探一层目录</td></tr>
+  <tr><td>添加 WebDAV 库</td><td>新增一个网盘连接</td></tr>
+  <tr><td>不在家时怎么连</td><td>远程访问指引</td></tr>
+  <tr><td rowspan="3">关于</td><td>帮助文档</td><td>跳转到本页</td></tr>
+  <tr><td>版本</td><td>当前版本号</td></tr>
+  <tr><td>缓存说明</td><td>缓存行为说明</td></tr>
+</table>
+`);
+
+// ── 常见问题 ───────────────────────────────────────────────────────────
+A('常见问题','conn-faq','连接类',
+`
+<h3>提示「用户名或密码不正确」</h3>
+<p>网络是通的，只是认证没过。常见原因：</p>
+<ul>
+  <li>填的是<b>登录密码</b>而不是 WebDAV 单独生成的密码</li>
+  <li>账号名填错（有的 NAS 用登录名而不是显示昵称）</li>
+  <li>网盘禁止管理员账号走 WebDAV —— 换普通账号试试</li>
+</ul>
+
+<h3>连上了，但目录是空的</h3>
+<p>这个账号<b>没有任何可见文件夹</b>。到网盘 / NAS 的权限设置里给它分配一个目录的读取权限。</p>
+
+<h3>提示「连接不上服务器」</h3>
+<ul>
+  <li>地址是否漏了 <code>https://</code> 或端口号</li>
+  <li>手机和 NAS 是否在同一局域网</li>
+  <li>HTTPS 用的是自签名证书 → 打开「允许自签名证书」</li>
+</ul>
+
+<h3>「这个地址看起来不是 WebDAV 服务」</h3>
+<p>大概率填成了「网页管理端口」。飞牛网页是 5666，WebDAV 是 5005 / 5006。</p>
+`);
+
+A('常见问题','import-faq','导入类',
+`
+<h3>导入很慢 / 中途停了</h3>
+<ul>
+  <li>正常现象：每本都要联网读目录，几十本就要几分钟</li>
+  <li>保持 App 在前台，别切走</li>
+  <li>重新点「添加为库」会跳过已导入的，继续导剩下的</li>
+</ul>
+
+<h3>压缩包打不开 / 显示 0 页</h3>
+<ul>
+  <li>确认是 <code>.zip</code> / <code>.cbz</code> / <code>.tar</code></li>
+  <li>加密压缩包需要输入密码</li>
+  <li><code>.tar.gz</code> 不支持在线读取，请先转成 zip</li>
+</ul>
+
+<h3>导入 0 本，提示「没有找到含图片的子文件夹」</h3>
+<ul>
+  <li>是不是选到了太上层（比如网盘根目录）？</li>
+  <li>如果是「合集」结构，确认<b>「识别合集结构」是开启的</b></li>
+</ul>
+
+<h3>重复导入会不会产生重复的书</h3>
+<p>不会。按「连接 + 目录地址」判重，已在库里的会被跳过。</p>
+`);
+
+A('常见问题','read-faq','阅读类',
+`
+<h3>页面高度会跳一下</h3>
+<p>某个页面还没解码过时，高度是按抽样估算的；解码后会自动校正一次。
+翻过一次就不再跳。</p>
+
+<h3>翻页能到，但位置对不准</h3>
+<p>长条模式下总高度是动态计算的，拖动进度条松手后会做两轮收敛修正。
+如果仍偏差，可以再拖一次，或直接上下滑动到目标位置。</p>
+
+<h3>字太小 / 太挤</h3>
+<p>点屏幕中间呼出菜单 → 排版设置，可调字号、行距、边距。</p>
+
+<h3>想跑满 120Hz 但不知道在哪设置</h3>
+<p>见「阅读 → 高刷新率」一节，需要你在系统设置里把本应用加进白名单。</p>
+`);
+
+A('常见问题','about','版本与下载',
+`
+<h2>版本号规则</h2>
+<table>
+  <tr><th>情况</th><th>规则</th></tr>
+  <tr><td>用户明确要求</td><td>主版本 +1，次/修订归零</td></tr>
+  <tr><td>有新功能</td><td>次版本 +1，修订归零</td></tr>
+  <tr><td>只修 bug</td><td>修订号 +1</td></tr>
+</table>
+
+<h2>下载与校验</h2>
+<p>所有版本发布在 <a href="https://github.com/BaiFeng940/inkscroll/releases">GitHub Releases</a>，
+附带 <code>SHA256SUMS.txt</code>，下载后可校验完整性：</p>
+<pre><code>sha256sum -c SHA256SUMS.txt</code></pre>
+
+<h2>开源许可</h2>
+<p>MIT。源码：<a href="https://github.com/BaiFeng940/inkscroll">github.com/BaiFeng940/inkscroll</a></p>
+`);
+
+// ══════════════════════════════════════════════════════════════════════
+// 渲染
+// ══════════════════════════════════════════════════════════════════════
+const navEl = document.getElementById('nav');
+const mainEl = document.getElementById('main');
+
+(function buildNav(){
+  let html = '';
+  let lastGroup = null;
+  for (const a of ARTICLES) {
+    if (a.group !== lastGroup) {
+      html += `<div class="grp">${a.group}</div>`;
+      lastGroup = a.group;
+    }
+    html += `<a href="#/${a.id}" data-id="${a.id}">${a.title}</a>`;
+  }
+  navEl.innerHTML = html;
+})();
+
+function render(){
+  const m = location.hash.match(/^#\/(.+)$/);
+  const id = m ? m[1] : ARTICLES[0].id;
+  const art = ARTICLES.find(a => a.id === id) || ARTICLES[0];
+
+  mainEl.innerHTML = `
+    <h1>${art.title}</h1>
+    <div class="meta">${art.group}</div>
+    ${art.html}
+    <footer>
+      inkScroll · <a href="../index.html">官网</a> ·
+      <a href="https://github.com/BaiFeng940/inkscroll">GitHub</a> ·
+      对应版本 0.6.0
+    </footer>`;
+
+  navEl.querySelectorAll('a').forEach(a => {
+    a.classList.toggle('active', a.dataset.id === art.id);
+  });
+
+  document.title = art.title + ' - inkScroll 帮助中心';
+  document.body.classList.remove('open');
+  window.scrollTo(0, 0);
+}
+
+addEventListener('hashchange', render);
+render();
+
+document.getElementById('menuBtn').addEventListener('click', () => {
+  document.body.classList.toggle('open');
+});
+</script>
+</body>
+</html>
