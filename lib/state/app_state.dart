@@ -140,8 +140,8 @@ class AppState extends ChangeNotifier {
         },
       );
 
-      debugPrint('[import] scan: 候选 ${candidates.length}，压缩包 '
-          '${candidates.where((c) => c.isArchive).length}');
+      lastImportSummary = '扫描到 ${candidates.length} 个候选'
+          '（压缩包 ${candidates.where((c) => c.isArchive).length}）';
       if (candidates.isEmpty) {
         _setProgress(null, '');
         return WebDavLibraryResult(
@@ -174,7 +174,7 @@ class AppState extends ChangeNotifier {
         }
       }
 
-      debugPrint('[import] 待导 ${fresh.length}，跳过 $skipped');
+      lastImportSummary = '$lastImportSummary；待导 ${fresh.length}，跳过 $skipped';
       if (fresh.isEmpty) {
         _setProgress(null, '');
         return WebDavLibraryResult(
@@ -278,7 +278,9 @@ class AppState extends ChangeNotifier {
         books = _prefs.loadBooks();
         notifyListeners();
 
-        debugPrint('[import] 完成：成功 ${imported.length}，失败 ${failures.length}');
+        lastImportSummary = '$lastImportSummary；成功 ${imported.length} 本'
+            '，失败 ${failures.length} 个'
+            '${failures.isEmpty ? '' : '（首个：${failures.first}）'}';
         // 整批结束后在后台顺序补封面（只补可见的，见 ensureAllCovers 注释）
         ensureAllCovers();
       }
@@ -519,6 +521,12 @@ class AppState extends ChangeNotifier {
 
   /// 批量导入期间推迟封面生成
   bool _deferCovers = false;
+
+  /// 最近一次「添加为库」的结果摘要（设置页直接显示）。
+  ///
+  /// release 包拿不到日志，把结果留在界面上是唯一可靠的诊断手段 ——
+  /// 也让用户自己能看到"为什么没导进来"。
+  String? lastImportSummary;
 
   /// 后台**顺序**生成缺失的封面。
   ///

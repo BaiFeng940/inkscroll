@@ -117,7 +117,22 @@ class _SettingsScreenState extends State<SettingsScreen> {
                   onPressed: () => _openLibrary(app, null),
                 ),
                 const SizedBox(height: 8),
-                OutlinedButton.icon(
+                if (app.lastImportSummary != null) ...[
+                const SizedBox(height: 10),
+                Container(
+                  width: double.infinity,
+                  padding: const EdgeInsets.all(10),
+                  decoration: BoxDecoration(
+                    color: theme.colorScheme.surfaceContainerHighest,
+                    borderRadius: BorderRadius.circular(8),
+                  ),
+                  child: Text(
+                    '上次导入：${app.lastImportSummary}',
+                    style: const TextStyle(fontSize: 11, height: 1.5),
+                  ),
+                ),
+              ],
+              OutlinedButton.icon(
                   icon: const Icon(Icons.public, size: 18),
                   label: const Text('不在家时怎么连？（远程访问）'),
                   style: OutlinedButton.styleFrom(
@@ -136,7 +151,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
           const ListTile(
             leading: Icon(Icons.info_outline),
             title: Text('inkScroll'),
-            subtitle: Text('版本 0.3.7 · 本地与网盘漫画阅读器\n'
+            subtitle: Text('版本 0.3.9 · 本地与网盘漫画阅读器\n'
                 '不收集任何数据；只有你主动连接网盘时才有网络请求'),
             isThreeLine: true,
           ),
