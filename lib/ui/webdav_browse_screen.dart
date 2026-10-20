@@ -675,16 +675,11 @@ class _ConnectionFormState extends State<_ConnectionForm> {
           ),
         ),
         const SizedBox(height: 12),
-        TextField(
-          controller: _label,
-          decoration: const InputDecoration(
-            labelText: '备注名（可选）',
-            hintText: '家里的飞牛',
-            border: OutlineInputBorder(),
-            prefixIcon: Icon(Icons.label_outline),
-          ),
-        ),
-        const SizedBox(height: 12),
+        // ★ 顺序必须是 地址 → 用户名 → 密码 → 备注。
+        //   之前「备注名」夹在地址和用户名之间，用户（包括我自己）
+        //   会按"地址/账号/密码/备注"的习惯往下填，结果用户名进了备注、
+        //   密码进了用户名，最后报"用户名或密码不正确" —— 一个纯粹的
+        //   布局把功能搞坏的问题。可选的字段永远放最后。
         TextField(
           controller: _user,
           autocorrect: false,
@@ -701,12 +696,23 @@ class _ConnectionFormState extends State<_ConnectionForm> {
           autocorrect: false,
           decoration: InputDecoration(
             labelText: '密码',
+            helperText: '多数网盘的 WebDAV 密码要单独生成，不是登录密码',
             border: const OutlineInputBorder(),
             prefixIcon: const Icon(Icons.lock_outline),
             suffixIcon: IconButton(
               icon: Icon(_obscure ? Icons.visibility_off : Icons.visibility),
               onPressed: () => setState(() => _obscure = !_obscure),
             ),
+          ),
+        ),
+        const SizedBox(height: 12),
+        TextField(
+          controller: _label,
+          decoration: const InputDecoration(
+            labelText: '备注名（可选）',
+            hintText: '家里的飞牛',
+            border: OutlineInputBorder(),
+            prefixIcon: Icon(Icons.label_outline),
           ),
         ),
         const SizedBox(height: 4),
