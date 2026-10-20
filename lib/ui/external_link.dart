@@ -7,10 +7,12 @@ library;
 
 import 'package:flutter/services.dart';
 
-const MethodChannel _channel = MethodChannel('inkscroll/saf');
+import '../app_version.dart';
 
-/// 官方文档 / 帮助中心地址
-const String kHelpUrl = 'https://baifeng940.github.io/inkscroll/help/';
+// 转出去，调用方只需要 `import 'external_link.dart'` 就能拿到帮助地址
+export '../app_version.dart' show kHelpUrl;
+
+const MethodChannel _channel = MethodChannel('inkscroll/saf');
 
 /// 打开帮助文档。失败时静默 —— 不能因为打不开链接就弹错误打断用户。
 Future<bool> openHelpDocs() => openExternalUrl(kHelpUrl);

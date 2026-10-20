@@ -16,6 +16,7 @@ import '../data/models/book_meta.dart';
 import '../data/saf_folder.dart';
 import '../importers/import_utils.dart';
 import '../state/app_state.dart';
+import 'update_dialog.dart';
 import 'image_order_sheet.dart';
 import 'prepare_screen.dart';
 import 'reader/reader_screen.dart';
@@ -35,6 +36,7 @@ class _HomeScreenState extends State<HomeScreen> with SingleTickerProviderStateM
 
   // ── 批量管理 ──
   bool _selecting = false;
+  bool _updateCheckScheduled = false;
   final Set<String> _selected = <String>{};
 
   void _startSelect(BookMeta book) {
@@ -64,6 +66,22 @@ class _HomeScreenState extends State<HomeScreen> with SingleTickerProviderStateM
           ..clear()
           ..addAll(visible.map((b) => b.id));
       }
+    });
+  }
+
+  // ── 启动自动检查更新 ──
+  //
+  // 一天最多一次，且只在"确实有更新"时打扰用户。
+  // 网络失败静默 —— 打开应用是为了看书，不是看错误提示。
+  void _maybeCheckUpdate() {
+    final app = context.read<AppState>();
+    if (!app.shouldAutoCheckUpdate) return;
+    WidgetsBinding.instance.addPostFrameCallback((_) async {
+      if (!mounted) return;
+      final r = await app.checkUpdate();
+      if (!mounted || !r.hasUpdate) return;
+      await showUpdateDialog(context, result: r, manual: false,
+          onSkip: app.skipVersion);
     });
   }
 
@@ -449,6 +467,12 @@ class _HomeScreenState extends State<HomeScreen> with SingleTickerProviderStateM
 
     if (!app.ready) {
       return const Scaffold(body: Center(child: CircularProgressIndicator()));
+    }
+
+    // 首帧之后再检查更新，避免和 bootstrap 抢网络/抢帧
+    if (!_updateCheckScheduled) {
+      _updateCheckScheduled = true;
+      _maybeCheckUpdate();
     }
 
     final theme = Theme.of(context);

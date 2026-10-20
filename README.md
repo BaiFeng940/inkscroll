@@ -175,6 +175,21 @@ App 内也能直达：**设置 → 关于 → 帮助文档**
 
 ---
 
+## 国内镜像
+
+GitCode（国内访问更快，也是应用内「检查更新」的首选源）：
+
+**https://gitcode.com/BaiFeng940/inkscroll**
+
+同步方法见 [docs/GITCODE.md](docs/GITCODE.md)，或直接跑
+`pwsh -File tool/push-to-gitcode.ps1`。
+
+## 应用内更新
+
+设置 → 关于 → **检查更新**。启动时也会自动检查（一天最多一次）。
+
+检查顺序：**GitCode 国内镜像 → GitHub 兜底**，两个源都失败就当「已是最新」，
+不会弹错误打扰阅读。有新版时提示版本号、更新说明，可选择「去下载 / 稍后 / 跳过此版本」。
 ## 从 NAS 在线看漫画（WebDAV）
 
 支持**飞牛 OS / 群晖 / 威联通 / Alist / Nextcloud** 等所有支持 WebDAV 的 NAS。

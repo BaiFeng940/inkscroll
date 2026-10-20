@@ -18,7 +18,9 @@ import 'package:provider/provider.dart';
 import '../data/webdav/webdav_connection.dart';
 import '../core/errors.dart';
 import '../data/models/reader_settings.dart';
+import '../app_version.dart';
 import 'external_link.dart';
+import 'update_dialog.dart';
 import '../state/app_state.dart';
 import 'webdav_browse_screen.dart';
 
@@ -31,6 +33,38 @@ class SettingsScreen extends StatefulWidget {
 
 class _SettingsScreenState extends State<SettingsScreen> {
   CacheStats? _cache;
+
+  // ── 检查更新 ──
+  bool _checkingUpdate = false;
+  String _updateLabel = '当前版本 $kAppVersion';
+
+  Future<void> _checkUpdate(AppState app) async {
+    setState(() {
+      _checkingUpdate = true;
+      _updateLabel = '正在检查…';
+    });
+    try {
+      final r = await app.checkUpdate(manual: true);
+      if (!mounted) return;
+      setState(() {
+        if (r.latest == null) {
+          _updateLabel = '当前版本 $kAppVersion · 检查失败（网络或镜像不可用）';
+        } else if (r.hasUpdate) {
+          _updateLabel = '有新版本 ${r.latest}（当前 $kAppVersion）';
+        } else {
+          _updateLabel = '当前版本 $kAppVersion · 已是最新';
+        }
+      });
+      await showUpdateDialog(
+        context,
+        result: r,
+        manual: true,
+        onSkip: app.skipVersion,
+      );
+    } finally {
+      if (mounted) setState(() => _checkingUpdate = false);
+    }
+  }
   bool _cacheClearing = false;
 
   @override
@@ -385,6 +419,19 @@ class _SettingsScreenState extends State<SettingsScreen> {
           // ── 关于 ──
           _SectionHeader('关于'),
           ListTile(
+            leading: const Icon(Icons.system_update_outlined),
+            title: const Text('检查更新'),
+            subtitle: Text(_updateLabel),
+            trailing: _checkingUpdate
+                ? const SizedBox(
+                    width: 18,
+                    height: 18,
+                    child: CircularProgressIndicator(strokeWidth: 2),
+                  )
+                : const Icon(Icons.chevron_right),
+            onTap: _checkingUpdate ? null : () => _checkUpdate(app),
+          ),
+          ListTile(
             leading: const Icon(Icons.menu_book_outlined),
             title: const Text('帮助文档'),
             subtitle: const Text(
@@ -404,7 +451,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
           const ListTile(
             leading: Icon(Icons.info_outline),
             title: Text('inkScroll'),
-            subtitle: Text('版本 0.7.1 · 本地与网盘漫画阅读器\n'
+            subtitle: Text('版本 0.8.0 · 本地与网盘漫画阅读器\n'
                 '不收集任何数据；只有你主动连接网盘时才有网络请求'),
             isThreeLine: true,
           ),
