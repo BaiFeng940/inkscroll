@@ -151,6 +151,52 @@ class _SettingsScreenState extends State<SettingsScreen> {
 
           const Divider(height: 24),
 
+          // ── 屏幕刷新率 ──
+          _SectionHeader('屏幕刷新率'),
+          Padding(
+            padding: const EdgeInsets.fromLTRB(16, 0, 16, 12),
+            child: RichText(
+              text: TextSpan(
+                style: TextStyle(
+                  fontSize: 12,
+                  height: 1.6,
+                  color: theme.hintColor,
+                ),
+                children: const [
+                  TextSpan(
+                    text: 'inkScroll 会主动向系统申请高刷新率，但 Android '
+                        '默认只给系统允许列表里的应用开高刷。\n\n',
+                  ),
+                  TextSpan(
+                    text: '需要你手动把本应用加进去：',
+                    style: TextStyle(fontWeight: FontWeight.w700),
+                  ),
+                  TextSpan(
+                    text: '\n打开 系统设置 → 显示与亮度 → 屏幕刷新率，'
+                        '找到「使用高刷新率的应用」（有的机型叫「高刷新率应用列表」'
+                        '或「选择应用」），把 inkScroll 打开。\n\n'
+                        '常见机型位置：\n'
+                        '· vivo / iQOO：设置 → 显示与亮度 → 屏幕刷新率 → '
+                        '使用高刷新率的应用\n'
+                        '· OPPO / 一加：设置 → 显示与亮度 → 屏幕刷新率 → 选择应用\n'
+                        '· 小米 / Redmi：设置 → 显示 → 高刷新率 → 应用列表\n'
+                        '· 华为 / 荣耀：设置 → 显示与亮度 → 屏幕刷新率\n\n',
+                  ),
+                  TextSpan(
+                    text: '找不到这个选项也不影响使用',
+                    style: TextStyle(fontWeight: FontWeight.w700),
+                  ),
+                  TextSpan(
+                    text: '：不动它照样能正常看书，只是滑动可能停在 60Hz。'
+                        '系统不允许应用自己绕过这个限制。',
+                  ),
+                ],
+              ),
+            ),
+          ),
+
+          const Divider(height: 24),
+
           // ── 通过压缩包导入 ──
           _SectionHeader('通过压缩包导入'),
           Padding(
@@ -328,7 +374,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
           const ListTile(
             leading: Icon(Icons.info_outline),
             title: Text('inkScroll'),
-            subtitle: Text('版本 0.4.0 · 本地与网盘漫画阅读器\n'
+            subtitle: Text('版本 0.4.1 · 本地与网盘漫画阅读器\n'
                 '不收集任何数据；只有你主动连接网盘时才有网络请求'),
             isThreeLine: true,
           ),

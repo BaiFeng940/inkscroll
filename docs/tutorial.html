@@ -77,6 +77,7 @@
     <li><a href="#import">选目录并开始导入</a></li>
     <li><a href="#wait">导入要等多久，为什么要等</a></li>
     <li><a href="#read">开始阅读</a></li>
+    <li><a href="#outside">不在家时怎么连（宽带与端口）</a></li>
     <li><a href="#settings">相关设置</a></li>
     <li><a href="#faq">常见问题</a></li>
   </ol>
@@ -255,7 +256,98 @@
   缓存可以在「设置 → 存储 → 清理缓存」里清掉。
 </div>
 
-<h2 id="settings"><span class="n">8</span>相关设置</h2>
+<h2 id="outside"><span class="n">8</span>不在家时怎么连（宽带与端口）</h2>
+
+<p>在家连 NAS 只要填局域网地址就行（如 <code>https://192.168.1.10:5006</code>）。
+但一旦出门，手机连的是移动网络，就访问不到这个"内网地址"了。
+这是很多人在这一步卡住的原因 —— 下面把要说清楚的都写清楚。</p>
+
+<h3>先判断：你家宽带有没有公网 IP</h3>
+
+<p>在能上网的电脑上搜「IP」，记下查到的地址，再和<b>主路由器的 WAN 口地址</b>对比：</p>
+
+<table>
+  <tr><th>查到的地址</th><th>含义</th><th>能不能直接外网访问</th></tr>
+  <tr><td>和路由器 WAN 地址一致，形如 <code>120.x.x.x</code>、<code>218.x.x.x</code></td>
+      <td>有公网 IPv4</td><td>✅ 可以（走端口映射）</td></tr>
+  <tr><td><code>100.64.x.x</code> ~ <code>100.127.x.x</code> 开头</td>
+      <td>运营商 <b>CGNAT</b> 大内网</td><td>❌ 端口映射无效，只能走隧道</td></tr>
+  <tr><td><code>10.x</code> / <code>172.16~31.x</code> / <code>192.168.x</code></td>
+      <td>私有地址（可能光猫又做了一层 NAT）</td><td>❌ 需要先解决多层 NAT</td></tr>
+</table>
+
+<h3>情况 A：有公网 IP → 端口映射 + DDNS</h3>
+
+<ol>
+  <li>登录<b>主路由器</b>后台，找「端口转发 / 虚拟服务器 / 端口映射 / 虚拟主机」
+      （不同品牌叫法不同，本质都是"外部端口 → 内网 IP:端口"）</li>
+  <li>加一条规则：
+    <table>
+      <tr><th>字段</th><th>填什么</th></tr>
+      <tr><td>外部端口</td><td>自己挑一个不常用的，如 <code>50068</code></td></tr>
+      <tr><td>内部 IP</td><td>NAS 的局域网地址，如 <code>192.168.1.10</code></td></tr>
+      <tr><td>内部端口</td><td>WebDAV 端口，常见 <code>5006</code>（飞牛）</td></tr>
+      <tr><td>协议</td><td>TCP</td></tr>
+    </table>
+  </li>
+  <li>在 NAS 上开 <b>DDNS</b>（飞牛自带：设置 → 网络 → DDNS），拿到一个固定域名</li>
+  <li>在 App 里再添一条连接：<code>https://你的域名:50068</code>，
+      和局域网那条<b>并存</b>，在家用局域网、在外用域名</li>
+</ol>
+
+<div class="box warn">
+  <b>⚠️ 光猫 + 路由器双层 NAT</b>
+  如果光猫也做了拨号（路由器的 WAN 口拿到的是 <code>192.168.x.x</code>），
+  只在路由器上做映射是不够的 —— 外面的包先到光猫就被丢了。三种解法：
+  <ol style="margin:8px 0 0">
+    <li>光猫上设 <b>DMZ 主机</b> 指向路由器 WAN IP（最省事）</li>
+    <li>光猫上也加一条同样的端口映射</li>
+    <li>光猫改<b>桥接模式</b>，让路由器拨号（最干净，但可能影响 IPTV / 固话）</li>
+  </ol>
+</div>
+
+<figure>
+  <img src="img/settings.png" alt="设置页">
+  <figcaption>「在线库 → 不在家时怎么连」里也有这份指引</figcaption>
+</figure>
+
+<h3>情况 B：没有公网 IP（CGNAT / 纯内网）→ 内网穿透隧道</h3>
+
+<p>思路反过来：让 <b>NAS 主动向外建立连接</b>，外面的设备再连到中转服务器上，
+就不需要公网 IP 了。常见工具：<b>chmlfrp / SakuraFrp / frp / Cloudflare Tunnel</b>。</p>
+
+<p>以 frp 类工具为例，在 NAS 上装客户端后建一条隧道，有三个关键选项：</p>
+
+<table>
+  <tr><th>选项</th><th>怎么填</th><th>为什么</th></tr>
+  <tr><td>端口类型</td><td><b>TCP</b>（不要选 HTTP / HTTPS）</td>
+      <td>TCP 是原始字节转发，NAS 的 TLS 端到端保留，密码不会在中转服务器上被解开；
+          选 HTTP/HTTPS 还会被要求备案域名</td></tr>
+  <tr><td>本地端口</td><td>WebDAV 端口，如 <code>5006</code></td>
+      <td>填成网页端口（<code>5666</code>）会连到管理界面，App 会报"不是 WebDAV 服务"</td></tr>
+  <tr><td>数据加密 / 压缩</td><td>都<b>关闭</b></td>
+      <td>流量本来就是 TLS 加密的，再加密纯耗 CPU；图片本身已压缩，再压几乎没收益</td></tr>
+</table>
+
+<p>隧道建立后，服务商会给你一个形如 <code>xxx.example.com:12345</code> 的地址，
+在 App 里填 <code>https://xxx.example.com:12345</code>，
+打开「允许自签名证书」（证书是 NAS 自己的，和域名对不上）即可。</p>
+
+<div class="box ok">
+  <b>为什么推荐隧道</b>
+  它同时绕开了：没有公网 IP、多层 NAT、运营商封端口、公网 IP 会变。
+  代价是速度受中转服务器限制，且流量经过第三方（但内容仍是你自己的 TLS 加密）。
+</div>
+
+<div class="box warn">
+  <b>安全提醒</b>
+  把 NAS 暴露到公网（无论端口映射还是隧道）都有风险，请务必：
+  ① 在 NAS 上建一个<b>只读</b>的 WebDAV 账号专门给阅读器用；
+  ② 用非标准端口；
+  ③ 保持 HTTPS，不要退回 http。
+</div>
+
+<h2 id="settings"><span class="n">9</span>相关设置</h2>
 
 <table>
   <tr><th>设置项</th><th>作用</th></tr>
@@ -266,8 +358,13 @@
   <tr><td>存储 → 清理缓存</td>
       <td>显示当前缓存占用（网盘页 / 解压产物 / 封面三类），可一键清理。
           <b>只清缓存</b>：书架、阅读进度、网盘连接和密码都不会被删除。</td></tr>
+  <tr><td>屏幕刷新率说明</td>
+      <td>想跑满 120Hz，需要你在<b>系统设置</b>里把 inkScroll 加进
+          「使用高刷新率的应用」白名单 —— 系统不允许应用自己绕过。
+          设置页里有各品牌的具体路径。</td></tr>
   <tr><td>在线库 → 不在家时怎么连</td>
-      <td>外网访问的两种方案：公网 IP + 端口映射，或内网穿透隧道。</td></tr>
+      <td>外网访问的两种方案：公网 IP + 端口映射，或内网穿透隧道。
+          详见 <a href="#outside">第 8 节</a>。</td></tr>
 </table>
 
 <div class="box ok">
@@ -276,7 +373,7 @@
   并写入了 <code>.nomedia</code> 标记，<b>不会出现在系统相册中</b>。
 </div>
 
-<h2 id="faq"><span class="n">9</span>常见问题</h2>
+<h2 id="faq"><span class="n">10</span>常见问题</h2>
 
 <h3>提示「用户名或密码不正确」</h3>
 <p>说明网络是通的，只是认证没过。常见原因：</p>
@@ -314,7 +411,7 @@
 
 <footer>
   inkScroll · <a href="./index.html">返回首页</a> ·
-  本教程对应版本 0.4.0
+  本教程对应版本 0.4.1
 </footer>
 
 </div>
