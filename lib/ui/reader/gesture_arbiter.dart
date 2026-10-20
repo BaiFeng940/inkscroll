@@ -142,16 +142,39 @@ class TapArbiter {
   final Duration doubleTapDelay;
   Timer? _timer;
 
+  /// 当前挂起（尚未确认）的单击回调
+  VoidCallback? _pending;
+
   /// 提交一次单击。若在 [doubleTapDelay] 内出现双击，回调会被取消。
   void submitSingleTap(VoidCallback onSingleTap) {
     _timer?.cancel();
-    _timer = Timer(doubleTapDelay, onSingleTap);
+    _pending = onSingleTap;
+    _timer = Timer(doubleTapDelay, () {
+      _pending = null;
+      onSingleTap();
+    });
+  }
+
+  /// **立刻执行**挂起的单击。
+  ///
+  /// 连续快速翻页时必须这样处理：用户点了 5 下"下一页"，
+  /// 若每一下都只是覆盖挂起回调（旧的被 cancel），
+  /// 最终只会翻 1 页 —— 实测就是这个症状。
+  /// 当判定"这已经不是双击"（例如落点离上一次很远）时，
+  /// 先把上一次单击兑现，再挂起新的。
+  void flushPending() {
+    final cb = _pending;
+    _timer?.cancel();
+    _timer = null;
+    _pending = null;
+    cb?.call();
   }
 
   /// 双击发生时调用：取消挂起的单击
   void cancelPendingTap() {
     _timer?.cancel();
     _timer = null;
+    _pending = null;
   }
 
   void dispose() => _timer?.cancel();

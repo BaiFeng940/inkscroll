@@ -341,16 +341,17 @@ class _ReaderScreenState extends State<ReaderScreen> {
       );
     }
 
-    // 翻页模式：保留"双击缩放"，单击交给 TapArbiter 延迟仲裁
-    var lastTapPosition = Offset.zero;
+    // 翻页模式：**不再注册 onDoubleTap**。
+    //
+    // 框架的 DoubleTapGestureRecognizer 会在 pointer-down 就抢占竞技场，
+    // 有两个副作用：
+    //   ① 拖动手势被拖累（历史上导致过"上下滑动完全失效"）；
+    //   ② 把连续快速点击吞成双击 —— 用户连点"下一页"只翻 1 页。
+    // 现在双击改由 `ReaderController.handleSingleTap` 自己按
+    // 时间 + 落点判定，处理更可控。
     return GestureDetector(
       behavior: HitTestBehavior.translucent,
       onTapUp: (d) => c.handleSingleTap(d.localPosition, viewport),
-      onDoubleTapDown: (d) {
-        lastTapPosition = d.localPosition;
-        c.arbiter.rememberDoubleTapPosition(d.localPosition);
-      },
-      onDoubleTap: () => c.handleDoubleTap(lastTapPosition),
       child: content,
     );
   }

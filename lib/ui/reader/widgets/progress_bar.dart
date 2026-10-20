@@ -5,10 +5,11 @@
 /// 1) **直接监听 ValueNotifier，不走 setState 整树重建**
 ///    滚动回调每帧触发；若进度条刷新触发阅读器重建，必然掉帧。
 ///
-/// 2) **拖动时不真正滚动，松手才跳转**
-///    如果 onChanged 里直接 jumpTo，长列表会疯狂重建，
-///    而且松手后位置会被滚动回调覆盖，体验很差。
-///    这里 onChanged 只更新气泡预览，onChangeEnd 才 animateTo。
+/// 2) **拖动时实时预览内容（节流），松手后精确收敛**
+///    只在 onChanged 里更新数字，用户根本看不出会停在哪一页；
+///    但每帧都让长列表滚动又会掉帧。折中是每 ~70ms 真正移动一次。
+///    松手时用 `jumpToRatioConverging`：长页的 maxScrollExtent 是估算值，
+///    要跳完再按实际布局修正两轮才准。
 library;
 
 import 'package:flutter/material.dart';
@@ -27,6 +28,15 @@ class ReaderProgressBar extends StatefulWidget {
 class _ReaderProgressBarState extends State<ReaderProgressBar> {
   /// 拖动中的预览值；为 null 表示当前显示真实进度
   double? _preview;
+
+  /// 上一次预览跳转的时间 —— 用来节流。
+  ///
+  /// 拖动时 `onChanged` 触发非常密集（每帧都可能），每次都让长列表
+  /// 滚动会掉帧；但完全不预览又只能"松手才看到结果"。
+  /// 折中：**每 ~70ms 实际移动一次视图**，肉眼是连贯的，代价可控。
+  DateTime? _lastPreviewAt;
+
+  static const _previewInterval = Duration(milliseconds: 70);
 
   @override
   Widget build(BuildContext context) {
@@ -66,12 +76,23 @@ class _ReaderProgressBarState extends State<ReaderProgressBar> {
                   child: Slider(
                     value: value,
                     // 拖动开始 → 进入预览模式，暂停进度回写
-                    onChangeStart: (v) => setState(() => _preview = v),
-                    // 拖动中 → 只更新气泡，不真正滚动
-                    onChanged: (v) => setState(() => _preview = v),
-                    // 松手 → 真正跳转，并退出预览模式。
-                    // 长页模式用收敛式跳转：maxScrollExtent 是估算值，
-                    // 直接跳会有偏差，跳完再按实际布局修正两轮。
+                    onChangeStart: (v) {
+                      _lastPreviewAt = null;
+                      setState(() => _preview = v);
+                    },
+                    // 拖动中 → **实时预览内容**（节流），用户能直接看到
+                    // 松手后会停在哪一页，而不是只有数字在变。
+                    onChanged: (v) {
+                      setState(() => _preview = v);
+                      final now = DateTime.now();
+                      if (_lastPreviewAt == null ||
+                          now.difference(_lastPreviewAt!) >= _previewInterval) {
+                        _lastPreviewAt = now;
+                        c.previewRatio(v);
+                      }
+                    },
+                    // 松手 → 精确定位（长页模式用收敛式跳转：
+                    // maxScrollExtent 是估算值，跳完要按实际布局修正两轮）
                     onChangeEnd: (v) {
                       c.jumpToRatioConverging(v, animate: true);
                       setState(() => _preview = null);

@@ -306,11 +306,55 @@ class ReaderController extends ChangeNotifier {
   void nextPage() {
     final doc = document;
     if (doc == null) return;
-    jumpToPage((_progress.pageIndex + 1).clamp(0, doc.pageCount - 1), animate: true);
+    _turnTo((_progress.pageIndex + 1).clamp(0, doc.pageCount - 1));
   }
 
   void prevPage() {
-    jumpToPage((_progress.pageIndex - 1).clamp(0, 1 << 30), animate: true);
+    _turnTo(_progress.pageIndex - 1);
+  }
+
+  /// 上一次翻页的时间，用来判断"是否在连续快速翻页"
+  DateTime? _lastTurnAt;
+
+  /// 翻页跳转。
+  ///
+  /// **连续快速翻页时必须直接跳，不能叠加动画。**
+  /// 每次 `animateToPage` 都要 220ms；用户连点 5 下就会有 5 个动画
+  /// 互相打断，位置在动画途中反复被重设，表现就是"卡住 / 停不到目标页"。
+  /// 所以间隔很短时退化成瞬时跳转，保证每次点击都**切实前进一页**。
+  void _turnTo(int target) {
+    final doc = document;
+    if (doc == null) return;
+    final clamped = target.clamp(0, doc.pageCount - 1);
+    final now = DateTime.now();
+    final rapid = _lastTurnAt != null &&
+        now.difference(_lastTurnAt!).inMilliseconds < 260;
+    _lastTurnAt = now;
+    jumpToPage(clamped, animate: !rapid);
+  }
+
+  /// 进度条拖动中的**实时预览**：只移动视图，不做动画、不写进度。
+  ///
+  /// 用瞬时跳转（`jumpTo` / `jumpToPage`）而不是动画 —— 拖动时每帧都
+  /// 要更新，动画会互相打断且明显滞后。
+  void previewRatio(double r) {
+    final doc = document;
+    if (doc == null) return;
+    final clamped = r.clamp(0.0, 1.0);
+    if (mode.isVertical) {
+      final m = metrics;
+      final c = verticalScroll;
+      if (m == null || c == null || !c.hasClients) return;
+      final target =
+          m.offsetForRatio(clamped).clamp(0.0, c.position.maxScrollExtent);
+      c.jumpTo(target);
+    } else {
+      final p = horizontalPager;
+      if (p == null || !p.hasClients) return;
+      final target = (clamped * (doc.pageCount - 1)).round();
+      p.jumpToPage(target.clamp(0, doc.pageCount - 1));
+      updatePageIndex(target.clamp(0, doc.pageCount - 1));
+    }
   }
 
   int get currentPageIndex => _progress.pageIndex;
@@ -382,32 +426,77 @@ class ReaderController extends ChangeNotifier {
 
   /// 单击分区：左 = 上一页，右 = 下一页，中 = 菜单
   ///
+  /// 上一次点击的时间与位置，用来自己判定双击。
+  ///
+  /// 为什么不交给 `GestureDetector` 的 `onDoubleTap`：
+  /// 它会在 pointer-down 就抢占手势竞技场，既拖累拖动（滚动失效），
+  /// 又把**连续快速点击**吞成双击 —— 用户连点"下一页"只前进 1 页。
+  /// 自己判定只多几行，却同时解决这两个问题。
+  DateTime? _lastTapAt;
+  Offset? _lastTapPos;
+
+  /// 判断两次点击是否构成"双击"的距离阈值（逻辑像素）
+  static const double _doubleTapSlop = 48;
+
   /// 必须经过 [TapArbiter] 延迟，否则双击会被先判成两次单击。
   void handleSingleTap(Offset localPosition, Size viewportSize) {
     if (menuVisible) {
       hideMenu();
       return;
     }
-    tapArbiter.submitSingleTap(() {
-      final x = localPosition.dx;
-      final leftZoneEnd = viewportSize.width * settings.tapZoneLeft;
-      final rightZoneStart = viewportSize.width * (1 - settings.tapZoneRight);
 
-      if (x < leftZoneEnd) {
-        // 章节内上一页；已在首则跳上一章
-        if (_progress.pageIndex > 0) {
-          prevPage();
-        } else {
-          goToChapter((document?.chapterOfPage(0)?.index ?? 0) - 1);
-        }
-      } else if (x > rightZoneStart) {
-        if (_progress.pageIndex < pageCount - 1) {
-          nextPage();
-        }
+    final x = localPosition.dx;
+    final leftZoneEnd = viewportSize.width * settings.tapZoneLeft;
+    final rightZoneStart = viewportSize.width * (1 - settings.tapZoneRight);
+    final inSideZone = x < leftZoneEnd || x > rightZoneStart;
+
+    // ── 侧边区（翻页区）：**每一次点击都必须翻页** ──
+    //
+    // 这里绝不做双击判定。原因很实际：用户想快速翻页时会对着右边缘
+    // 连点，落点几乎相同、间隔又很短 —— 从手势上看和"双击"一模一样。
+    // 若在这里做双击仲裁，连点 5 下只会翻 1~3 页（实测就是这个症状）。
+    // 双击缩放只在中间区域才有意义。
+    if (inSideZone) {
+      _lastTapAt = null;
+      _lastTapPos = null;
+      // 先把上一次还没兑现的点击执行掉，再执行这一次 —— 一按一页，不丢事件
+      tapArbiter.flushPending();
+      _turnForZone(x, leftZoneEnd, rightZoneStart);
+      return;
+    }
+
+    // ── 中间区域：时间 + 落点判双击（缩放），单击呼出菜单 ──
+    final now = DateTime.now();
+    final gap = _lastTapAt == null ? null : now.difference(_lastTapAt!);
+    final nearSame = _lastTapPos != null &&
+        (localPosition - _lastTapPos!).distance <= _doubleTapSlop;
+    final isDoubleTap = gap != null && gap.inMilliseconds < 300 && nearSame;
+
+    if (isDoubleTap) {
+      _lastTapAt = null;
+      _lastTapPos = null;
+      handleDoubleTap(localPosition);
+      return;
+    }
+
+    _lastTapAt = now;
+    _lastTapPos = localPosition;
+    tapArbiter.submitSingleTap(toggleMenu);
+  }
+
+  /// 按落点执行"上一页 / 下一页"
+  void _turnForZone(double x, double leftZoneEnd, double rightZoneStart) {
+    if (x < leftZoneEnd) {
+      if (_progress.pageIndex > 0) {
+        prevPage();
       } else {
-        toggleMenu();
+        goToChapter((document?.chapterOfPage(0)?.index ?? 0) - 1);
       }
-    });
+    } else if (x > rightZoneStart) {
+      if (_progress.pageIndex < pageCount - 1) {
+        nextPage();
+      }
+    }
   }
 
   void handleDoubleTap(Offset localPosition) {
