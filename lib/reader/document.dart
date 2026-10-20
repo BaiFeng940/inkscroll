@@ -31,6 +31,23 @@ final class LooseFileRef extends ContentRef {
   String toString() => 'LooseFileRef($path)';
 }
 
+/// PDF 页：内容不存在磁盘上，需要原生渲染器按需生成。
+///
+/// 只存**文件路径 + 页码**，不缓存位图 —— 一页 1600 宽的 ARGB 位图
+/// 解码后约 10 MB，几百页的 PDF 全存下来必然 OOM。
+final class PdfPageRef extends ContentRef {
+  const PdfPageRef({required this.path, required this.pageIndex});
+
+  /// PDF 在应用私有目录里的绝对路径
+  final String path;
+
+  /// 0 起的页下标
+  final int pageIndex;
+
+  @override
+  String toString() => 'PdfPageRef($path#$pageIndex)';
+}
+
 /// 压缩包内条目
 final class ArchiveEntryRef extends ContentRef {
   const ArchiveEntryRef({

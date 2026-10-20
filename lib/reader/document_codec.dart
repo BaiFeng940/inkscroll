@@ -200,6 +200,8 @@ class DocumentCodec {
           'entry': ref.entryPath,
           'conn': ref.connectionId,
         };
+      case PdfPageRef():
+        return {'t': 'pdf', 'path': ref.path, 'page': ref.pageIndex};
     }
   }
 
@@ -223,6 +225,11 @@ class DocumentCodec {
           connectionId: m['conn'] as String? ?? '',
           archiveUrl: m['archiveUrl'] as String,
           entryPath: m['entry'] as String,
+        );
+      case 'pdf':
+        return PdfPageRef(
+          path: m['path'] as String,
+          pageIndex: m['page'] as int? ?? 0,
         );
       case 'file':
       default:

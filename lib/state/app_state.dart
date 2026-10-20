@@ -23,6 +23,7 @@ import '../data/archive/archive_source.dart';
 import '../data/importer.dart';
 import '../data/models/book_meta.dart';
 import '../data/models/reader_settings.dart';
+import '../data/pdf/pdf_native.dart';
 import '../data/prefs_store.dart';
 import '../data/update_service.dart';
 import '../data/webdav/webdav_connection.dart';
@@ -31,6 +32,7 @@ import '../importers/webdav_archive_importer.dart';
 import '../importers/webdav_folder_importer.dart';
 import '../reader/cover_generator.dart';
 import '../reader/document.dart';
+import '../reader/pdf_page_resolver.dart';
 import '../reader/document_codec.dart';
 import '../reader/page_cache.dart';
 import '../reader/webdav_archive_resolver.dart';
@@ -445,6 +447,53 @@ class AppState extends ChangeNotifier {
     books = _prefs.loadBooks();
     notifyListeners();
     return removed;
+  }
+
+  /// 重建 PDF 文档（document.json 丢失或损坏时）。
+  ///
+  /// 只重新读页数/尺寸，**不渲染任何页面** —— 和首次导入走同一段逻辑。
+  Future<Document> _rebuildPdfDocument(BookMeta book) async {
+    final dir = store.bookDir(book.id);
+    final files = Directory(dir)
+        .listSync(recursive: false)
+        .whereType<File>()
+        .where((f) => f.path.toLowerCase().endsWith('.pdf'))
+        .toList();
+    if (files.isEmpty) {
+      throw const GenericError('找不到这本书的 PDF 文件，请删除后重新导入。');
+    }
+    final path = files.first.path;
+    final info = await const PdfNative().open(path);
+    final pages = <String, PageNode>{};
+    final ids = <String>[];
+    for (var i = 0; i < info.pageCount; i++) {
+      final id = 'p$i';
+      pages[id] = PageNode(
+        id: id,
+        kind: PageKind.pdfPage,
+        content: ImageContent(
+          ref: PdfPageRef(path: path, pageIndex: i),
+          intrinsicWidth: info.widths.length > i ? info.widths[i] : null,
+          intrinsicHeight: info.heights.length > i ? info.heights[i] : null,
+          mimeType: 'image/png',
+        ),
+        aspectRatio: info.aspectOf(i),
+        title: '第 ${i + 1} 页',
+      );
+      ids.add(id);
+    }
+    final rebuilt = Document(
+      id: 'doc-${book.id}',
+      bookId: book.id,
+      title: book.title,
+      kind: DocumentKind.pdf,
+      chapters: [Chapter(index: 0, title: book.title, pageIds: ids)],
+      pages: pages,
+      unit: ReadingUnit.page,
+      hint: DocumentLayoutHint.pagePreferred,
+    );
+    await DocumentCodec.save(dir, rebuilt);
+    return rebuilt;
   }
 
   Future<void> refreshBooks() async {
@@ -871,6 +920,27 @@ class AppState extends ChangeNotifier {
     // ① 快路径：直接读 JSON
     final cached = await DocumentCodec.load(dir);
 
+    // PDF 走独立解析器：它的"字节"不是读出来的，而是原生渲染出来的。
+    // 放在 switch 之前判断，避免给 PDF 也装一个读文件的解析器
+    // （那样会在第一页就报"不是图片"）。
+    if (book.kind == BookKind.pdf) {
+      final doc = cached ?? await _rebuildPdfDocument(book);
+      final pdfPath = doc.pagesInOrder
+          .map((p) => p.content)
+          .whereType<ImageContent>()
+          .map((c) => c.ref)
+          .whereType<PdfPageRef>()
+          .map((r) => r.path)
+          .firstOrNull;
+      if (pdfPath == null) {
+        throw const GenericError('这本 PDF 的页面信息已损坏，请删除后重新导入。');
+      }
+      return (
+        document: doc,
+        resolver: PdfPageResolver(pdfPath: pdfPath),
+      );
+    }
+
     // ② 无论走哪条路，都需要一个 resolver 指向真实字节
     switch (book.source) {
       case FolderSource():
@@ -978,6 +1048,10 @@ class AppState extends ChangeNotifier {
   //   代价是首次打开要等一次解压 → 所以配一个**带进度的等待界面**，
   //   而且解压结果落盘持久化，只有第一次打开需要等。
   bool needsPrepare(BookMeta book) {
+    // PDF 没有"解压"这回事 —— 页面是按需由原生渲染器生成的。
+    // 不加这一条的话，PDF 打开时会先弹一个"首次打开需要解压到缓存"的准备页，
+    // 用户点进去还得再点一次才能看书，非常莫名。
+    if (book.kind == BookKind.pdf) return false;
     if (book.source is! ArchiveSourceSpec) return false; // 文件夹/散图无需解压
     final marker = File(p.join(store.extractedDirFor(book.id), '.complete'));
     return !marker.existsSync();

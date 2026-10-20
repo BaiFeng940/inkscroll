@@ -40,7 +40,7 @@ class ImportRouter {
   late final ArchiveImporter _archive = ArchiveImporter(store: store);
   late final TxtImporter _txt = TxtImporter(store: store);
   late final LooseImageImporter _loose = LooseImageImporter(store: store);
-  late final PdfImporter _pdf = PdfImporter();
+  late final PdfImporter _pdf = PdfImporter(store: store);
   late final DocxImporter _docx = DocxImporter();
   late final WebImporter _web = WebImporter();
 
