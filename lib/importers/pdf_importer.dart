@@ -1,49 +1,46 @@
-/// PDF 导入 —— **骨架 + 接入指引**（尚未实现）。
+/// PDF 导入：**只取元数据，绝不预渲染**。
 ///
-/// 核心原则：**只取元数据，绝不预渲染**。
+/// ## 做法
 ///
-///   1) pubspec 加 `pdfx: ^2.6.0`（MIT 许可）
+/// 1. 把 PDF 复制进应用私有目录（file_picker 给的是临时缓存路径，
+///    系统随时可能清掉，必须自己留一份）；
+/// 2. 通过原生 `PdfRenderer` 只读**页数 + 每页尺寸**，一次遍历就够；
+/// 3. 每页生成一个 `PageNode`，内容是 `PdfPageRef(路径, 页码)` ——
+///    真正渲染推迟到阅读器按可见窗口做（见 `PdfPageResolver`）。
 ///
-///   2) 打开文档，只读页数与每页 MediaBox 尺寸（不 render）：
+/// ## 为什么不用 pdfx
 ///
-///        final doc = await PdfDocument.openFile(path);
-///        final count = doc.pagesCount;
-///        for (int i = 0; i < count; i++) {
-///          final page = await doc.getPage(i);
-///          final w = page.width, h = page.height;   // ← 只读尺寸
-///          // PageNode(kind: pdfPage, aspectRatio: w / h, ...)
-///        }
+/// `pdfx` / `pdf_render` 会把整个 pdfium 打进 APK（约 100 MB，还是三份 ABI）。
+/// Android 从 5.0 起系统自带 `PdfRenderer`（底层同样是 pdfium），
+/// 零体积增长、随 ROM 更新维护，正好匹配我们"按需渲染一页"的架构。
+/// 详见 `android/app/src/main/kotlin/com/inkscroll/reader/PdfPlugin.kt`。
 ///
-///   3) 渲染留在阅读器侧（ReaderScreen），按可见窗口做：
-///        可见页 + 上下各预渲染 1 页；离开窗口立即释放位图。
+/// ## 尺寸的作用
 ///
-///        final raster = await doc.render(
-///          pageNumber: i,
-///          width: min(viewportWidth * 2, 2048),   // ★ 必须限宽
-///          height: min(viewportWidth * 2, 2048) / aspect,
-///        );
-///
-///      ★ 限宽到 2048 的原因：2x 屏幕密度已足够清晰，
-///        同时把单页位图控制在 ~16MB 以内，避免超宽页 OOM。
-///
-///   4) 大文件策略：
-///        < 32MB  → 全部读入内存（PDF 解析需要随机访问）
-///        ≥ 32MB  → 分块落盘临时文件，交给 TempFileCache 做 LRU
-///
-///   5) 内存释放：pdfx 内部有文档级缓存，离开阅读器时必须 doc.close()，
-///      否则大 PDF 会常驻内存。
-///
-/// 引擎选择对比：
-///   pdfx                          ✅ MIT、随机渲染单页   ← 推荐
-///   Android PdfRenderer 原生通道   ✅ 内存控制最佳        ← 精细控制时用
-///   syncfusion_flutter_pdfviewer   ⚠️ 商业许可，开源项目慎用
+/// 每页写入 `aspectRatio = w / h`。虚拟长页的总高度完全依赖它 ——
+/// 缺了它就只能用兜底比例，滚动条会跳、页面会先塌后撑。
+/// 所以哪怕不渲染，也**必须**把每页尺寸读出来。
 library;
 
+import 'dart:io';
+
+import 'package:path/path.dart' as p;
+
 import '../core/errors.dart';
+import '../data/byte_store.dart';
 import '../data/importer.dart';
+import '../data/pdf/pdf_native.dart';
+import '../reader/document.dart';
 
 class PdfImporter implements Importer {
-  PdfImporter();
+  PdfImporter({required this.store, PdfNative? native})
+      : _native = native ?? const PdfNative();
+
+  final ByteStore store;
+  final PdfNative _native;
+
+  /// 超过这个页数只导入前面的部分，避免异常文件把内存撑爆
+  static const int maxPages = 5000;
 
   @override
   String get id => 'pdf';
@@ -53,15 +50,100 @@ class PdfImporter implements Importer {
 
   @override
   Future<ImportOutcome> run(ImportContext ctx) async {
-    return const ImportFailure(GenericError(
-      'PDF 导入尚未启用。\n\n'
-      '接入步骤见 lib/importers/pdf_importer.dart 顶部注释：\n'
-      '  1. pubspec 加 pdfx: ^2.6.0\n'
-      '  2. 只读 pagesCount 与每页 MediaBox 尺寸（不要预渲染）\n'
-      '  3. 每页生成 PageNode(kind: pdfPage, aspectRatio: w/h)\n'
-      '  4. 渲染放到阅读器里按可见窗口做，并限制渲染宽度 ≤ 2048\n'
-      '  5. 离开阅读器时 close() 释放文档缓存',
-      action: ErrorAction.convertFile,
+    final srcPath = ctx.pick.path;
+    if (srcPath == null) {
+      return const ImportFailure(GenericError('没有选择文件'));
+    }
+
+    final bookId = ctx.pick.sourceId;
+    final bookDir = store.bookDir(bookId);
+
+    // ── 第 1 步：复制到私有目录 ──
+    final dstPath = p.join(bookDir, p.basename(srcPath));
+    ctx.onProgress(0.05, '正在复制 PDF…');
+    try {
+      await Directory(bookDir).create(recursive: true);
+      if (!await File(dstPath).exists()) {
+        await ByteStore.copyFile(
+          srcPath,
+          dstPath,
+          onProgress: (r, label) => ctx.onProgress(r * 0.35, label),
+        );
+      }
+    } catch (e) {
+      return ImportFailure(GenericError('复制 PDF 失败：$e'));
+    }
+
+    // ── 第 2 步：只读页数与尺寸（不渲染）──
+    ctx.onProgress(0.4, '正在读取 PDF 页信息…');
+    PdfInfo info;
+    try {
+      info = await _native.open(dstPath);
+    } catch (e) {
+      return ImportFailure(GenericError(
+        '打不开这个 PDF：$e\n\n'
+        '常见原因：文件已加密（需要密码）、文件损坏，或其实不是 PDF。',
+      ));
+    }
+
+    if (info.pageCount <= 0) {
+      return const ImportFailure(GenericError('这个 PDF 里没有页面'));
+    }
+
+    final warnings = <String>[];
+    var count = info.pageCount;
+    if (count > maxPages) {
+      warnings.add('PDF 共 $count 页，已只导入前 $maxPages 页');
+      count = maxPages;
+    }
+
+    // ── 第 3 步：建页（只存引用 + 宽高比，不碰像素）──
+    final pages = <String, PageNode>{};
+    final pageIds = <String>[];
+    for (var i = 0; i < count; i++) {
+      final id = 'p$i';
+      final ref = PdfPageRef(path: dstPath, pageIndex: i);
+      pages[id] = PageNode(
+        id: id,
+        // 用 pdfPage 标记，语义上区别于普通图片
+        kind: PageKind.pdfPage,
+        content: ImageContent(
+          ref: ref,
+          intrinsicWidth: info.widths.length > i ? info.widths[i] : null,
+          intrinsicHeight: info.heights.length > i ? info.heights[i] : null,
+          // 渲染结果是 PNG，提前告诉下游，省一次格式探测
+          mimeType: 'image/png',
+        ),
+        aspectRatio: info.aspectOf(i),
+        title: '第 ${i + 1} 页',
+      );
+      pageIds.add(id);
+      if (i % 20 == 0) {
+        ctx.onProgress(0.4 + 0.55 * (i / count), '正在解析页面 $i/$count');
+      }
+    }
+
+    ctx.onProgress(1.0, '完成');
+    return ImportedDocument(Document(
+      id: 'doc-$bookId',
+      bookId: bookId,
+      title: ctx.pick.displayName,
+      kind: DocumentKind.pdf,
+      chapters: [
+        Chapter(
+          index: 0,
+          title: ctx.pick.displayName,
+          pageIds: pageIds,
+          coverRef: pageIds.isEmpty
+              ? null
+              : (pages[pageIds.first]!.content as ImageContent).ref,
+        ),
+      ],
+      pages: pages,
+      // PDF 是"一页一屏"，默认左右翻页；用户可在设置里改
+      unit: ReadingUnit.page,
+      hint: DocumentLayoutHint.pagePreferred,
+      warnings: warnings,
     ));
   }
 }

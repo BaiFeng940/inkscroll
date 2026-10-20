@@ -1085,14 +1085,14 @@ enum _ImportChoice {
 
   String get title => switch (this) {
         _ImportChoice.folder => '选择文件夹',
-        _ImportChoice.archive => '选择压缩包',
+        _ImportChoice.archive => '选择压缩包 / PDF',
         _ImportChoice.images => '选择图片（可多选）',
         _ImportChoice.url => '输入网页链接',
       };
 
   String get subtitle => switch (this) {
         _ImportChoice.folder => '文件夹内图片自动成章，文本自动分章分页',
-        _ImportChoice.archive => '支持 zip / tar；rar / 7z 需先转换',
+        _ImportChoice.archive => '支持 zip / tar / cbz / PDF；rar / 7z 需先转换',
         _ImportChoice.images => '直接按选择顺序生成一本漫画',
         _ImportChoice.url => '抓取网页正文（需要接入 html 解析，见代码注释）',
       };

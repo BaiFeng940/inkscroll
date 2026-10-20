@@ -11,12 +11,14 @@ class MainActivity : FlutterActivity() {
 
     private var safPlugin: SafFolderPlugin? = null
     private var refreshRate: RefreshRateController? = null
+    private var pdfPlugin: PdfPlugin? = null
     private var surfaceRateApplied = false
 
     override fun configureFlutterEngine(flutterEngine: FlutterEngine) {
         super.configureFlutterEngine(flutterEngine)
         safPlugin = SafFolderPlugin(this, flutterEngine.dartExecutor.binaryMessenger)
         refreshRate = RefreshRateController(this)
+        pdfPlugin = PdfPlugin(flutterEngine.dartExecutor.binaryMessenger)
     }
 
     override fun onCreate(savedInstanceState: Bundle?) {
@@ -68,6 +70,8 @@ class MainActivity : FlutterActivity() {
     }
 
     override fun onDestroy() {
+        pdfPlugin?.dispose()
+        pdfPlugin = null
         safPlugin?.dispose()
         safPlugin = null
         refreshRate = null
