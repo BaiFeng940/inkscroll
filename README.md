@@ -20,6 +20,37 @@
 
 ---
 
+## 安装包命名规范
+
+```
+inkscroll-<版本>-<架构>.apk     分架构包（推荐，体积小）
+inkscroll-<版本>-universal.apk  通用包（不知道架构时用）
+inkscroll-<版本>-SHA256SUMS.txt 校验文件
+```
+
+`<架构>` 采用 Android 官方的 **ABI 名称**（和 `adb shell getprop ro.product.cpu.abi`
+的输出一致），不另起别名，避免出现两套词汇：
+
+| 后缀 | 全称 | 含义 | 适用设备 |
+|---|---|---|---|
+| `arm64-v8a` | ARM64, **ARMv8-A** | 64 位 ARM | **2016 年后绝大多数手机** |
+| `armeabi-v7a` | ARM EABI v7a | 32 位 ARM | 较老的 32 位设备 |
+| `x86_64` | x86-64 | Intel / AMD | 模拟器、部分 Chromebook |
+| `universal` | — | 上述三种打包在一起 | 不确定时用（体积约 3 倍） |
+
+> **`v8a` 是什么**：`arm64` 指 64 位位宽，`v8a` 指 **ARMv8-A** 架构版本（A 表示
+> Application profile，面向应用处理器）。合起来 `arm64-v8a` 就是「64 位 ARMv8-A」，
+> 是当前 Android 手机的主流指令集。
+>
+> 为什么不把三种 ABI 打成一个包：那样每个用户都要多下 30 多 MB 用不到的原生库。
+> 分架构后 arm64 包只有 18.6 MB，而通用包 53.2 MB。
+
+校验下载完整性：
+
+```bash
+sha256sum -c SHA256SUMS.txt
+```
+
 ## 版本号规则
 
 `主版本.次版本.修订号`（如 `0.5.0`）：
