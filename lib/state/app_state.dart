@@ -140,6 +140,8 @@ class AppState extends ChangeNotifier {
         },
       );
 
+      debugPrint('[import] scan: 候选 ${candidates.length}，压缩包 '
+          '${candidates.where((c) => c.isArchive).length}');
       if (candidates.isEmpty) {
         _setProgress(null, '');
         return WebDavLibraryResult(
@@ -172,6 +174,7 @@ class AppState extends ChangeNotifier {
         }
       }
 
+      debugPrint('[import] 待导 ${fresh.length}，跳过 $skipped');
       if (fresh.isEmpty) {
         _setProgress(null, '');
         return WebDavLibraryResult(
@@ -253,7 +256,9 @@ class AppState extends ChangeNotifier {
             // batch 模式：先攒着，整批结束一次性写盘
             final book = await _persist(pick, doc, batch: pending);
             imported.add(book);
-          } catch (e) {
+          } catch (e, st) {
+            debugPrint('[import] ✗ ${c.name}: $e');
+            debugPrint('[import]   stack: $st');
             failures.add('${c.name}: $e');
           }
         }
@@ -268,6 +273,7 @@ class AppState extends ChangeNotifier {
         books = _prefs.loadBooks();
         notifyListeners();
 
+        debugPrint('[import] 完成：成功 ${imported.length}，失败 ${failures.length}');
         // 整批结束后在后台顺序补封面（只补可见的，见 ensureAllCovers 注释）
         ensureAllCovers();
       }
