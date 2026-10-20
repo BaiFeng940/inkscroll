@@ -327,10 +327,15 @@ class _SettingsScreenState extends State<SettingsScreen> {
       );
       return;
     }
+    // 失败时把**第一条完整原因**显示出来 —— 用户需要知道为什么；
+    // release 包没有日志，这也是定位问题的唯一线索。
     final failPart = result.failures.isEmpty
         ? ''
-        : '\n失败 ${result.failures.length} 个：${result.failures.take(2).join('; ')}';
-    _snack('已添加到在线库：${result.imported} 本$failPart');
+        : '\n\n失败 ${result.failures.length} 个，首个原因：\n${result.failures.first}';
+    _snack(
+      '已添加到在线库：${result.imported} 本$failPart',
+      isError: result.imported == 0 && result.failures.isNotEmpty,
+    );
     setState(() {});
   }
 

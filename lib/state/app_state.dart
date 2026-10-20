@@ -202,6 +202,11 @@ class AppState extends ChangeNotifier {
           );
           onImportProgress?.call(i + 1, fresh.length, label);
 
+          // 商用网盘对连发请求敏感：每本之间留一点间隔，避免触发软限流
+          if (c.isArchive && i > 0) {
+            await Future<void>.delayed(const Duration(milliseconds: 120));
+          }
+
           try {
             if (c.isArchive) {
               // ★ 网盘上的压缩包：一本书 = 一个包。
