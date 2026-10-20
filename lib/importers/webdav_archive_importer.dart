@@ -36,10 +36,10 @@ class WebDavArchiveImporter {
   ///
   /// 同目录的漫画图几乎总是同一尺寸，6 个样本足够得到可信中位数；
   /// 再往上加只是拿流量换精度，不划算。
-  static const int sniffSamples = 6;
+  static const int sniffSamples = 4;
 
   /// 嗅探并发。网盘一般能承受 3~4 路；再高容易触发限流。
-  static const int sniffConcurrency = 3;
+  static const int sniffConcurrency = 4;
 
   /// 一张图最多读多少字节来解析头部（网盘上按 Range 只取这么多）
   static const int sniffHeadBytes = 96 * 1024;

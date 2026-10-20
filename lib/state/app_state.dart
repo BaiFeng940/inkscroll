@@ -7,6 +7,7 @@
 library;
 
 import 'dart:async';
+import 'dart:math' as math;
 import 'dart:io';
 
 import 'package:flutter/foundation.dart';
@@ -198,79 +199,108 @@ class AppState extends ChangeNotifier {
       // 整批期间不生成封面，结束后统一在后台补（见 _scheduleCover 注释）
       _deferCovers = true;
       try {
-        for (var i = 0; i < fresh.length; i++) {
-          final c = fresh[i];
-          final label = '${c.name}（${c.pageCount} 页）';
-          _setProgress(
-            0.4 + 0.6 * (i / fresh.length),
-            '正在导入 ${i + 1}/${fresh.length}：$label',
-          );
-          onImportProgress?.call(i + 1, fresh.length, label);
+        // ── 并发导入 ──
+        //
+        // 之前是串行：一本 2~3 秒，170 本就要 7 分钟，用户全程干等。
+        // 而每本书的耗时**几乎全是网络往返**（EOCD、中央目录、几张小图的
+        // HTTP Range），本地 CPU 基本闲着 —— 串行动作等于把延迟累加。
+        //
+        // 用固定大小的 worker 池跑，结果按原始下标放回 slots，
+        // 保证**书架顺序和目录顺序一致**（并发完成顺序不可控）。
+        //
+        // 并发度取 4：再高会被 HttpClient 的 maxConnectionsPerHost（6）
+        // 排队，且更容易触碰网盘的软限流。每本书内部还有自己的抽样并发，
+        // 因此实际同时在飞的请求约为 4 × 3 ≈ 12 个。
+        final results = List<BookMeta?>.filled(fresh.length, null);
+        final perSlotBatch = List<List<BookMeta>?>.filled(fresh.length, null);
+        var nextIndex = 0;
+        var finished = 0;
 
-          // 商用网盘对连发请求敏感：每本之间留一点间隔，避免触发软限流
-          if (c.isArchive && i > 0) {
-            await Future<void>.delayed(const Duration(milliseconds: 120));
-          }
-
-          try {
-            if (c.isArchive) {
-              // ★ 网盘上的压缩包：一本书 = 一个包。
-              //   只读中央目录 + 少量样本，不解压整包。
-              final bookId = ByteStore.newBookId();
-              final doc = await WebDavArchiveImporter.buildDocument(
-                client: client,
-                connectionId: connection.id,
-                archiveUrl: c.url,
-                archiveName: c.name,
-                knownSize: c.archiveSize,
-              );
-              await DocumentCodec.save(store.bookDir(bookId), doc);
-              final meta = BookMeta(
-                id: bookId,
-                title: c.name,
-                kind: BookKind.comic,
-                source: WebDavArchiveSource(
+        Future<void> worker() async {
+          while (true) {
+            final i = nextIndex++;
+            if (i >= fresh.length) return;
+            final c = fresh[i];
+            final localBatch = <BookMeta>[];
+            try {
+              if (c.isArchive) {
+                // ★ 网盘上的压缩包：一本书 = 一个包。
+                //   只读中央目录 + 少量样本，不解压整包。
+                final bookId = ByteStore.newBookId();
+                final doc = await WebDavArchiveImporter.buildDocument(
+                  client: client,
                   connectionId: connection.id,
                   archiveUrl: c.url,
                   archiveName: c.name,
-                  archiveSize: c.archiveSize,
-                ),
-                pageCount: doc.pageCount,
-                chapterCount: doc.chapterCount,
-                importedAt: DateTime.now(),
-                description:
-                    doc.warnings.isEmpty ? null : doc.warnings.join('\n'),
-              );
-              pending.add(meta);
-              imported.add(meta);
-              continue;
+                  knownSize: c.archiveSize,
+                );
+                await DocumentCodec.save(store.bookDir(bookId), doc);
+                final meta = BookMeta(
+                  id: bookId,
+                  title: c.name,
+                  kind: BookKind.comic,
+                  source: WebDavArchiveSource(
+                    connectionId: connection.id,
+                    archiveUrl: c.url,
+                    archiveName: c.name,
+                    archiveSize: c.archiveSize,
+                  ),
+                  pageCount: doc.pageCount,
+                  chapterCount: doc.chapterCount,
+                  importedAt: DateTime.now(),
+                  description:
+                      doc.warnings.isEmpty ? null : doc.warnings.join('\n'),
+                );
+                localBatch.add(meta);
+                results[i] = meta;
+              } else {
+                // 直接建 Document，跳过单本导入的重复扫描。
+                // ★ 复用同一条连接：每本新建 client 都要重做一次 TCP+TLS
+                //   握手，走公网隧道时 100 本书能白白多花几十秒。
+                final doc = await WebDavFolderImporter.buildFromCandidate(
+                  connection: connection,
+                  candidate: c,
+                  client: client,
+                );
+                final pick = SourcePick(
+                  kind: SourcePickKind.webdav,
+                  displayName: c.name,
+                  sourceId: ByteStore.newBookId(),
+                  uri: Uri.tryParse(c.url),
+                  webdavConnectionId: connection.id,
+                  webdavFolderUrl: c.url,
+                  webdavFolderName: c.name,
+                );
+                results[i] = await _persist(pick, doc, batch: localBatch);
+              }
+            } catch (e, st) {
+              debugPrint('[import] ✗ ${c.name}: $e');
+              debugPrint('[import]   stack: $st');
+              failures.add('${c.name}: $e');
             }
-
-            // 直接建 Document，跳过单本导入的重复扫描。
-            // ★ 复用同一条连接：每本新建 client 都要重做一次 TCP+TLS
-            //   握手，走公网隧道时 100 本书能白白多花几十秒。
-            final doc = await WebDavFolderImporter.buildFromCandidate(
-              connection: connection,
-              candidate: c,
-              client: client,
+            perSlotBatch[i] = localBatch;
+            finished++;
+            final label = '${c.name}（${c.pageCount} 页）';
+            _setProgress(
+              0.4 + 0.6 * (finished / fresh.length),
+              '正在导入 $finished/${fresh.length}：$label',
             );
-            final pick = SourcePick(
-              kind: SourcePickKind.webdav,
-              displayName: c.name,
-              sourceId: ByteStore.newBookId(),
-              uri: Uri.tryParse(c.url),
-              webdavConnectionId: connection.id,
-              webdavFolderUrl: c.url,
-              webdavFolderName: c.name,
-            );
-            // batch 模式：先攒着，整批结束一次性写盘
-            final book = await _persist(pick, doc, batch: pending);
-            imported.add(book);
-          } catch (e, st) {
-            debugPrint('[import] ✗ ${c.name}: $e');
-            debugPrint('[import]   stack: $st');
-            failures.add('${c.name}: $e');
+            onImportProgress?.call(finished, fresh.length, label);
           }
+        }
+
+        final workerCount = math.min(
+          _archiveImportConcurrency,
+          math.max(1, fresh.length),
+        );
+        await Future.wait(List.generate(workerCount, (_) => worker()));
+
+        // 按目录顺序合并结果（并发完成顺序 ≠ 目录顺序）
+        for (var i = 0; i < results.length; i++) {
+          final meta = results[i];
+          final batch = perSlotBatch[i];
+          if (batch != null) pending.addAll(batch);
+          if (meta != null) imported.add(meta);
         }
       } finally {
         _deferCovers = false;
@@ -633,6 +663,14 @@ class AppState extends ChangeNotifier {
   /// release 包拿不到日志，把结果留在界面上是唯一可靠的诊断手段 ——
   /// 也让用户自己能看到"为什么没导进来"。
   String? lastImportSummary;
+
+  /// 批量导入网盘压缩包时的并发度。
+  ///
+  /// 每本书的耗时几乎全是网络往返（EOCD、中央目录、几张样本图的 Range），
+  /// 串行等于把延迟直接累加 —— 170 本 × 2.5 s ≈ 7 分钟。
+  /// 也不能开太高：HttpClient 的 maxConnectionsPerHost 是 6，
+  /// 而且每本书内部还有自己的抽样并发（4 路），4×4=16 已接近上限。
+  static const int _archiveImportConcurrency = 4;
 
   /// 后台**顺序**生成缺失的封面。
   ///
