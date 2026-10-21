@@ -440,15 +440,20 @@ class ReaderController extends ChangeNotifier {
 
   /// 必须经过 [TapArbiter] 延迟，否则双击会被先判成两次单击。
   void handleSingleTap(Offset localPosition, Size viewportSize) {
-    if (menuVisible) {
-      hideMenu();
-      return;
-    }
-
     final x = localPosition.dx;
     final leftZoneEnd = viewportSize.width * settings.tapZoneLeft;
     final rightZoneStart = viewportSize.width * (1 - settings.tapZoneRight);
     final inSideZone = x < leftZoneEnd || x > rightZoneStart;
+
+    // 菜单（遮罩）浮出时的行为：
+    //   · 点两侧 → **照样翻页**，菜单保持打开
+    //     （典型用法：边调翻页方式/阅读设置边翻几页看效果）
+    //   · 点中间 → 关闭菜单
+    // 之前是"菜单一开，任何点击都只关菜单"，等于遮罩浮出后完全没法翻页。
+    if (menuVisible && !inSideZone) {
+      hideMenu();
+      return;
+    }
 
     // ── 侧边区（翻页区）：**每一次点击都必须翻页** ──
     //

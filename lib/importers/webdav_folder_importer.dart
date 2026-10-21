@@ -407,6 +407,34 @@ class WebDavFolderImporter implements Importer {
   /// 每一层"合集"最多再展开多少个子目录（防止误选根目录时炸开）
   static const int maxNested = 40;
 
+  /// 合集里的一本书该叫什么名字。
+  ///
+  /// 现实命名：`漫画根目录/XX合集/第一话/`。只取「第一话」的话，库里有
+  /// 几十本「第一话」「第二话」，完全分不清谁是谁。规则：
+  ///   1. 合集名去掉「合集」二字（它只是分类标记，不是书名的一部分）；
+  ///   2. 拼成 `合集名 子名`；
+  ///   3. 子名如果已经以合集名开头（重复部分），不重复拼接；
+  ///   4. 压缩包去掉扩展名。
+  ///
+  /// 例：`XX合集` + `第一话` → `XX 第一话`
+  static String collectionBookName(String collection, String sub) {
+    final c = collection.replaceAll('合集', '').trim();
+    if (c.isEmpty) return _stripArchiveExt(sub);
+    final s = _stripArchiveExt(sub);
+    if (s.startsWith(c)) return s;
+    return '$c $s';
+  }
+
+  static String _stripArchiveExt(String name) {
+    var s = name.trim();
+    for (final ext in const ['.zip', '.cbz', '.tar']) {
+      if (s.toLowerCase().endsWith(ext)) {
+        return s.substring(0, s.length - ext.length);
+      }
+    }
+    return s;
+  }
+
   /// 扫描一个直接子目录，返回它内部的书（可能是 1 本、多本、或 0 本）。
   ///
   /// ## 合集（嵌套一层）
@@ -468,7 +496,7 @@ class WebDavFolderImporter implements Importer {
         if (subImages.isNotEmpty) {
           out.add(WebDavComicCandidate(
             url: sub.url,
-            name: sub.name,
+            name: collectionBookName(dirName, sub.name),
             images: subImages,
           ));
           continue;
@@ -480,7 +508,7 @@ class WebDavFolderImporter implements Importer {
         for (final a in subZips) {
           out.add(WebDavComicCandidate(
             url: a.url,
-            name: a.name,
+            name: collectionBookName(dirName, a.name),
             images: const [],
             isArchive: true,
             archiveSize: a.size,

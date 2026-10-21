@@ -124,7 +124,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
                   obscureText: true,
                   decoration: const InputDecoration(
                     labelText: '添加密码',
-                    border: OutlineInputBorder(),
+
                     isDense: true,
                   ),
                 ),
@@ -535,7 +535,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
           const ListTile(
             leading: Icon(Icons.info_outline),
             title: Text('inkScroll'),
-            subtitle: Text('版本 0.11.2 · 本地与网盘漫画阅读器\n'
+            subtitle: Text('版本 0.12.0 · 本地与网盘漫画阅读器\n'
                 '不收集任何数据；只有你主动连接网盘时才有网络请求'),
             isThreeLine: true,
           ),
