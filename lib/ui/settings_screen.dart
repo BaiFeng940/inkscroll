@@ -486,14 +486,6 @@ class _SettingsScreenState extends State<SettingsScreen> {
                   ),
                 ),
               ],
-              OutlinedButton.icon(
-                  icon: const Icon(Icons.public, size: 18),
-                  label: const Text('不在家时怎么连？（远程访问）'),
-                  style: OutlinedButton.styleFrom(
-                    minimumSize: const Size.fromHeight(42),
-                  ),
-                  onPressed: _showRemoteAccessHelp,
-                ),
               ],
             ),
           ),
@@ -535,7 +527,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
           const ListTile(
             leading: Icon(Icons.info_outline),
             title: Text('inkScroll'),
-            subtitle: Text('版本 0.12.0 · 本地与网盘漫画阅读器\n'
+            subtitle: Text('版本 0.12.1 · 本地与网盘漫画阅读器\n'
                 '不收集任何数据；只有你主动连接网盘时才有网络请求'),
             isThreeLine: true,
           ),
@@ -555,75 +547,6 @@ class _SettingsScreenState extends State<SettingsScreen> {
   }
 
   // ------------------------------------------------------------------
-
-  /// 「不在家时怎么连」指引。
-  ///
-  /// 这是用户最常问的问题，而且答案在 App 之外（路由器端口映射）。
-  /// 与其让他去搜，不如在这里写清楚 —— 不需要装任何额外软件。
-  Future<void> _showRemoteAccessHelp() async {
-    await showDialog<void>(
-      context: context,
-      builder: (ctx) => AlertDialog(
-        title: const Row(
-          children: [
-            Icon(Icons.public, size: 20),
-            SizedBox(width: 8),
-            Text('不在家时怎么连'),
-          ],
-        ),
-        content: const SingleChildScrollView(
-          child: Column(
-            crossAxisAlignment: CrossAxisAlignment.start,
-            mainAxisSize: MainAxisSize.min,
-            children: [
-              Text(
-                '有两条路，取决于你家的网络怎么接的。先做第 1 步判断，再选走哪条。',
-                style: TextStyle(fontSize: 13, height: 1.55),
-              ),
-              SizedBox(height: 14),
-              _HelpStep(
-                n: '1',
-                title: '判断有没有公网 IP',
-                body: '在能上网的电脑上搜「IP」，看查到的地址和路由器「WAN 口地址」是否一致。'
-                    '一致 → 有公网 IP，走方案 A；'
-                    '是 100.64.x.x 开头、或光猫后面还套了一层路由器 → 走方案 B。',
-              ),
-              _HelpStep(
-                n: 'A',
-                title: '有公网 IP：路由器端口映射',
-                body: '主路由器 → 端口转发 / 虚拟服务器：'
-                    '外部端口（如 50068）→ 内网 NAS 的 5006（TCP）。'
-                    '再配个 DDNS 域名（飞牛自带），地址填 https://你的域名:50068。\n'
-                    '注意：光猫和路由器双层 NAT 时，两层都要做映射才通。',
-              ),
-              _HelpStep(
-                n: 'B',
-                title: '没有公网 IP：用隧道穿透',
-                body: 'chmlfrp / frp / Cloudflare Tunnel 这类内网穿透，'
-                    '由 NAS 主动向外连接，能绕过双层 NAT 和运营商限制。\n'
-                    '关键三点：端口类型选 TCP（保留 TLS 端到端）、'
-                    '本地端口填 5006、加密和压缩都关掉。',
-              ),
-              _HelpStep(
-                n: 'C',
-                title: '在 App 里填最终地址',
-                body: '把隧道给的外网地址或你的域名填进来，'
-                    '和局域网地址并存两条连接，在家/在外各用一条。',
-              ),
-              SizedBox(height: 10),
-              _HelpWarn(),
-            ],
-          ),
-        ),
-        actions: [
-          TextButton(
-            onPressed: () => Navigator.of(ctx).pop(),
-            child: const Text('知道了'),
-          ),
-        ],
-      ),
-    );
-  }
 
   static String _themeLabel(ThemeMode m) => switch (m) {
         ThemeMode.system => '跟随系统',
@@ -775,99 +698,6 @@ class _SectionHeader extends StatelessWidget {
           letterSpacing: 0.6,
           color: Theme.of(context).colorScheme.primary,
         ),
-      ),
-    );
-  }
-}
-
-/// 远程访问指引里的一步
-class _HelpStep extends StatelessWidget {
-  const _HelpStep({required this.n, required this.title, required this.body});
-
-  final String n;
-  final String title;
-  final String body;
-
-  @override
-  Widget build(BuildContext context) {
-    final primary = Theme.of(context).colorScheme.primary;
-    return Padding(
-      padding: const EdgeInsets.only(bottom: 12),
-      child: Row(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          Container(
-            width: 20,
-            height: 20,
-            margin: const EdgeInsets.only(top: 1),
-            decoration: BoxDecoration(
-              color: primary.withValues(alpha: 0.15),
-              shape: BoxShape.circle,
-            ),
-            alignment: Alignment.center,
-            child: Text(
-              n,
-              style: TextStyle(
-                fontSize: 12,
-                fontWeight: FontWeight.w700,
-                color: primary,
-              ),
-            ),
-          ),
-          const SizedBox(width: 10),
-          Expanded(
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                Text(
-                  title,
-                  style: const TextStyle(
-                    fontSize: 13,
-                    fontWeight: FontWeight.w600,
-                    height: 1.4,
-                  ),
-                ),
-                const SizedBox(height: 2),
-                Text(
-                  body,
-                  style: const TextStyle(fontSize: 12, height: 1.55),
-                ),
-              ],
-            ),
-          ),
-        ],
-      ),
-    );
-  }
-}
-
-/// 安全提醒 —— 把 WebDAV 暴露到公网是有风险的，必须说清楚
-class _HelpWarn extends StatelessWidget {
-  const _HelpWarn();
-
-  @override
-  Widget build(BuildContext context) {
-    return Container(
-      padding: const EdgeInsets.all(10),
-      decoration: BoxDecoration(
-        color: const Color(0xFFFFC53D).withValues(alpha: 0.14),
-        borderRadius: BorderRadius.circular(8),
-      ),
-      child: const Row(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          Icon(Icons.warning_amber_rounded, size: 18, color: Color(0xFFB8860B)),
-          SizedBox(width: 8),
-          Expanded(
-            child: Text(
-              '把网盘服务暴露到公网有风险。请务必：'
-              '① 建一个只读的 WebDAV 账号给阅读器；'
-              '② 用非标准外部端口；'
-              '③ 保持 HTTPS（自签也行）。',
-              style: TextStyle(fontSize: 12, height: 1.55),
-            ),
-          ),
-        ],
       ),
     );
   }
