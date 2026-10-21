@@ -31,6 +31,7 @@ class SourcePick {
     this.modifiedAt,
     this.alreadyLocal = false,
     this.manuallyOrdered = false,
+
     this.webdavConnectionId,
     this.webdavFolderUrl,
     this.webdavFolderName,

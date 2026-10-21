@@ -16,13 +16,18 @@ import 'dart:typed_data';
 import '../../core/errors.dart';
 import '../byte_source.dart';
 import 'archive_source.dart';
+import 'zip_crypto.dart';
 
 class ZipArchiveSource implements ArchiveSource {
   ZipArchiveSource(
     this._src, {
     this.maxEntryBytes = kDefaultMaxEntryBytes,
     EntryCache? cache,
+    this.password,
   }) : _cache = cache ?? EntryCache();
+
+  /// 加密压缩包的密码（ZipCrypto 传统加密）。null 表示未知。
+  final String? password;
 
   final RandomAccessByteSource _src;
   final int maxEntryBytes;
@@ -298,6 +303,60 @@ class ZipArchiveSource implements ArchiveSource {
     final nameLen = _u16(local, 26);
     final extraLen = _u16(local, 28);
     final dataStart = entry.localHeaderOffset + 30 + nameLen + extraLen;
+
+    // ── 加密条目：ZipCrypto 传统加密 ──
+    //
+    // 之前这里直接抛"不支持解密"，等于这类压缩包完全打不开。
+    // ZipCrypto 只是个基于 CRC32 的流密码，纯 Dart 就能解，
+    // 而中文漫画圈里绝大多数加密 zip 正是这个模式。
+    //
+    // ★ 不做分级试探：加密密钥流是连续的，只读一段密文无法从中途开始
+    //   解压，所以这里老实读完整条再解（这类文件少，正确性优先）。
+    if (entry.isEncrypted) {
+      if (entry.compressionMethod == 99) {
+        // AES-256（WinZip AE-x）：要 AES + HMAC 校验，工程量完全不同
+        throw const GenericError(
+          '这个压缩包用的是 AES-256 加密，当前版本不支持。\n'
+          '请用 7-Zip 重新打包成「ZipCrypto」加密，或解出未加密的 zip 再导入。',
+          action: ErrorAction.convertFile,
+        );
+      }
+      final pwd = password;
+      if (pwd == null || pwd.isEmpty) {
+        throw const ArchivePasswordRequiredError();
+      }
+      final encLen = math.min(
+        entry.compressedSize,
+        math.max(0, _fileLen - dataStart),
+      );
+      if (encLen <= ZipCrypto.headerSize) {
+        throw CorruptArchiveError(detail: '${entry.entryPath} 加密数据长度非法');
+      }
+      final crypto = ZipCrypto.withPassword(pwd)!;
+      final enc = await _src.read(dataStart, encLen);
+      final plain = crypto.decrypt(enc);
+      final payload = Uint8List.sublistView(plain, ZipCrypto.headerSize);
+
+      if (entry.compressionMethod == 0) {
+        final n = math.min(need, payload.length);
+        final out = Uint8List.sublistView(payload, 0, n);
+        if (maxBytes == null) _cache.put(cacheKey, out);
+        return out;
+      }
+      if (entry.compressionMethod != 8) {
+        throw UnsupportedCompressionError(entry.compressionMethod);
+      }
+      Uint8List raw;
+      try {
+        raw = inflateEntry(payload, entry.uncompressedSize);
+      } catch (_) {
+        // 解压失败最常见的两个原因：密码错，或数据损坏
+        throw const ArchivePasswordWrongError();
+      }
+      final out = raw.length <= need ? raw : subView(raw, 0, need);
+      if (maxBytes == null) _cache.put(cacheKey, out);
+      return out;
+    }
 
     final Uint8List result;
     final outputOnly = maxBytes != null; // 只取前 N 字节（嗅探图片头）
