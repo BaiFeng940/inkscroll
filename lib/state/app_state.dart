@@ -636,6 +636,30 @@ class AppState extends ChangeNotifier {
         return await _persist(pick, document);
 
       case NeedPassword(:final attempt):
+        // ── 密码字典自动尝试 ──
+        //
+        // 字典默认为空 —— 空字典等于**不启用**，不会做任何猜测。
+        // 逐个试，成功就把密码写进这本书的 source（之后翻页要用）。
+        if (password == null && zipPasswords.isNotEmpty) {
+          for (final guess in zipPasswords) {
+            _setProgress(0.1, '正在用字典中的密码尝试…');
+            try {
+              final retry = await importer.run(
+                ctx.withPassword(guess),
+              );
+              if (retry is ImportedDocument) {
+                debugPrint('[import] 字典命中：$guess');
+                return await _persist(
+                  pick,
+                  retry.document,
+                  archivePassword: guess,
+                );
+              }
+            } catch (_) {
+              // 这个密码不对，继续试下一个
+            }
+          }
+        }
         throw PasswordPromptNeeded(attempt: attempt);
 
       case ImportFailure(:final error):
@@ -652,6 +676,7 @@ class AppState extends ChangeNotifier {
     SourcePick pick,
     Document doc, {
     List<BookMeta>? batch,
+    String? archivePassword,
   }) async {
     final bookId = pick.sourceId;
 
@@ -697,6 +722,24 @@ class AppState extends ChangeNotifier {
 
   /// 批量导入期间推迟封面生成
   bool _deferCovers = false;
+
+  /// 压缩包密码字典（默认空 = 不启用自动尝试）
+  List<String> zipPasswords = const [];
+
+  Future<void> addZipPassword(String pw) async {
+    final v = pw.trim();
+    if (v.isEmpty) return;
+    if (zipPasswords.contains(v)) return;
+    zipPasswords = [...zipPasswords, v];
+    await _prefs.saveZipPasswords(zipPasswords);
+    notifyListeners();
+  }
+
+  Future<void> removeZipPassword(String pw) async {
+    zipPasswords = zipPasswords.where((e) => e != pw).toList();
+    await _prefs.saveZipPasswords(zipPasswords);
+    notifyListeners();
+  }
 
   /// 是否启用「合集」深度扫描（识别 根目录/合集/第一话 这种结构）
   bool deepScanLibrary = true;
@@ -1021,13 +1064,17 @@ class AppState extends ChangeNotifier {
     }
   }
 
-  Future<ArchiveSource> _openArchive(RandomAccessByteSource src, String path) async {
+  Future<ArchiveSource> _openArchive(
+    RandomAccessByteSource src,
+    String path, {
+    String? password,
+  }) async {
     if (path.toLowerCase().endsWith('.tar')) {
       final t = TarArchiveSource(src);
       await t.open();
       return t;
     }
-    final z = ZipArchiveSource(src);
+    final z = ZipArchiveSource(src, password: password);
     await z.open();
     return z;
   }

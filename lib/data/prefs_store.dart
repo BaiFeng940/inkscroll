@@ -117,6 +117,18 @@ class PrefsStore {
   /// 用户点了「跳过这个版本」的版本号
   static const _kSkippedVersion = 'update.skippedVersion.v1';
 
+  /// 压缩包密码字典（用户手动添加，默认空）。
+  ///
+  /// 用途：导入加密压缩包时按顺序自动尝试，命中就记住该密码。
+  /// 默认空 —— **空字典等于不启用**，不做任何猜测尝试。
+  static const _kZipPasswords = 'zip.dictionary.v1';
+
+  List<String> loadZipPasswords() =>
+      _prefs.getStringList(_kZipPasswords) ?? const [];
+
+  Future<void> saveZipPasswords(List<String> list) async {
+    await _prefs.setStringList(_kZipPasswords, list);
+  }
   DateTime? loadLastUpdateCheck() {
     final ms = _prefs.getInt(_kLastUpdateCheck);
     if (ms == null) return null;

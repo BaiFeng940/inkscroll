@@ -35,6 +35,7 @@ sealed class BookSource {
         return ArchiveSourceSpec(
           path: json['path'] as String,
           format: json['format'] as String? ?? 'zip',
+          password: json['pw'] as String?,
         );
     }
   }
@@ -42,14 +43,29 @@ sealed class BookSource {
 
 /// 压缩包：阅读时用 ZipArchiveSource 按需读条目
 final class ArchiveSourceSpec extends BookSource {
-  const ArchiveSourceSpec({required this.path, this.format = 'zip'});
+  const ArchiveSourceSpec({
+    required this.path,
+    this.format = 'zip',
+    this.password,
+  });
 
   /// app 私有目录内的绝对路径（导入时从 file_picker 的临时位置复制过来）
   final String path;
   final String format; // zip | tar | rar | 7z
 
+  /// 加密压缩包的密码（ZipCrypto）。
+  ///
+  /// 必须存下来：加密 zip 的**每一页**都要解密才能读，不存的话
+  /// 每次翻页都得重新问一遍用户。
+  final String? password;
+
   @override
-  Map<String, dynamic> toJson() => {'type': 'archive', 'path': path, 'format': format};
+  Map<String, dynamic> toJson() => {
+        'type': 'archive',
+        'path': path,
+        'format': format,
+        if (password != null && password!.isNotEmpty) 'pw': password,
+      };
 }
 
 /// 文件夹：阅读时直接按相对路径拼绝对路径

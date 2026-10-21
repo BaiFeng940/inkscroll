@@ -38,6 +38,89 @@ class _SettingsScreenState extends State<SettingsScreen> {
   bool _checkingUpdate = false;
   String _updateLabel = '当前版本 $kAppVersion';
 
+  /// 管理压缩包密码字典。
+  ///
+  /// 字典默认**空 = 不启用** —— 空的时候不会对加密压缩包做任何猜测，
+  /// 这点必须让用户看得见，否则容易误以为"设了就能自动破解"。
+  Future<void> _manageZipPasswords(AppState app) async {
+    final controller = TextEditingController();
+    await showDialog<void>(
+      context: context,
+      builder: (ctx) => StatefulBuilder(
+        builder: (ctx2, setLocal) => AlertDialog(
+          title: const Text('压缩包密码字典'),
+          content: SizedBox(
+            width: 400,
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                if (app.zipPasswords.isEmpty)
+                  const Padding(
+                    padding: EdgeInsets.only(bottom: 12),
+                    child: Text(
+                      '字典为空，此功能未启用。\n'
+                      '导入加密压缩包时会弹窗让你输入密码。',
+                      style: TextStyle(
+                          fontSize: 12, color: Colors.grey, height: 1.5),
+                    ),
+                  )
+                else
+                  Flexible(
+                    child: SingleChildScrollView(
+                      child: Column(
+                        mainAxisSize: MainAxisSize.min,
+                        children: [
+                          for (final pw in app.zipPasswords)
+                            ListTile(
+                              dense: true,
+                              contentPadding: EdgeInsets.zero,
+                              leading: const Icon(Icons.key, size: 18),
+                              title: Text(pw),
+                              trailing: IconButton(
+                                icon: const Icon(Icons.close, size: 18),
+                                onPressed: () async {
+                                  await app.removeZipPassword(pw);
+                                  setLocal(() {});
+                                },
+                              ),
+                            ),
+                        ],
+                      ),
+                    ),
+                  ),
+                const SizedBox(height: 12),
+                TextField(
+                  controller: controller,
+                  obscureText: true,
+                  decoration: const InputDecoration(
+                    labelText: '添加密码',
+                    border: OutlineInputBorder(),
+                    isDense: true,
+                  ),
+                ),
+              ],
+            ),
+          ),
+          actions: [
+            TextButton(
+              onPressed: () => Navigator.of(ctx).pop(),
+              child: const Text('关闭'),
+            ),
+            FilledButton(
+              onPressed: () async {
+                await app.addZipPassword(controller.text);
+                controller.clear();
+                setLocal(() {});
+              },
+              child: const Text('添加'),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+
   Future<void> _checkUpdate(AppState app) async {
     setState(() {
       _checkingUpdate = true;
@@ -278,6 +361,25 @@ class _SettingsScreenState extends State<SettingsScreen> {
 
           const Divider(height: 24),
 
+          // ── 压缩包密码字典 ──
+          ListTile(
+            leading: const Icon(Icons.key_outlined),
+            title: const Text('压缩包密码字典'),
+            subtitle: Text(
+              app.zipPasswords.isEmpty
+                  ? '未添加任何密码 —— 此功能未启用。\n'
+                      '加密压缩包仍会弹窗让你手动输入。'
+                  : '已保存 ${app.zipPasswords.length} 个密码，'
+                      '导入加密压缩包时会按顺序自动尝试。',
+              style: const TextStyle(height: 1.5),
+            ),
+            isThreeLine: true,
+            trailing: const Icon(Icons.chevron_right),
+            onTap: () => _manageZipPasswords(app),
+          ),
+
+          const Divider(height: 24),
+
           // ── 存储 ──
           _SectionHeader('存储'),
           ListTile(
@@ -451,7 +553,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
           const ListTile(
             leading: Icon(Icons.info_outline),
             title: Text('inkScroll'),
-            subtitle: Text('版本 0.10.0 · 本地与网盘漫画阅读器\n'
+            subtitle: Text('版本 0.11.0 · 本地与网盘漫画阅读器\n'
                 '不收集任何数据；只有你主动连接网盘时才有网络请求'),
             isThreeLine: true,
           ),

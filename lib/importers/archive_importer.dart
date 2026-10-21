@@ -70,7 +70,7 @@ class ArchiveImporter implements Importer {
 
     ArchiveSource source;
     try {
-      source = await _openSource(byteSource, dstPath);
+      source = await _openSource(byteSource, dstPath, password: ctx.password);
     } on NotAnArchiveError {
       await byteSource.close();
       return const ImportFailure(NotAnArchiveError());
@@ -121,15 +121,16 @@ class ArchiveImporter implements Importer {
 
   Future<ArchiveSource> _openSource(
     RandomAccessByteSource byteSource,
-    String path,
-  ) async {
+    String path, {
+    String? password,
+  }) async {
     final lower = path.toLowerCase();
     if (lower.endsWith('.tar')) {
       final tar = TarArchiveSource(byteSource);
       await tar.open();
       return tar;
     }
-    final zip = ZipArchiveSource(byteSource);
+    final zip = ZipArchiveSource(byteSource, password: password);
     await zip.open();
     return zip;
   }
