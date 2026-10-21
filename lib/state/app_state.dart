@@ -166,13 +166,25 @@ class AppState extends ChangeNotifier {
       //
       // 之前重复点「添加为库」会把同一个目录再导一遍，产生一堆重复的书，
       // 用户还以为是加载慢。按 (连接, 目录地址) 判重。
-      final existing = <String>{
-        for (final b in books)
-          if (b.source case WebDavSource(:final connectionId, :final folderUrl))
-            '$connectionId|${folderUrl.replaceAll(RegExp(r'/+$'), '').toLowerCase()}',
-      };
+      //
+      // ⚠️ 判重必须**同时覆盖文件夹和压缩包**。
+      //
+      // 之前这里只收集了 WebDavSource（文件夹）—— 压缩包对应的
+      // WebDavArchiveSource 从来没进过集合，于是每重新导一次，
+      // 174 个压缩包就原样再导一遍。真机上清库时看到「已选 373 本」
+      // 就是这个原因（不是导入逻辑重复执行，是判重漏了一类来源）。
       String keyOf(String connId, String url) =>
           '$connId|${url.replaceAll(RegExp(r'/+$'), '').toLowerCase()}';
+
+      final existing = <String>{};
+      for (final b in books) {
+        final src = b.source;
+        if (src is WebDavSource) {
+          existing.add(keyOf(src.connectionId, src.folderUrl));
+        } else if (src is WebDavArchiveSource) {
+          existing.add(keyOf(src.connectionId, src.archiveUrl));
+        }
+      }
 
       final fresh = <WebDavComicCandidate>[];
       var skipped = 0;
@@ -199,6 +211,14 @@ class AppState extends ChangeNotifier {
       final imported = <BookMeta>[];
       final failures = <String>[];
       final pending = <BookMeta>[];
+
+      // 防重入：连点两次「添加为库」会并发跑两轮，两轮都先去重再写盘，
+      // 结果就是每本都进两次。真机上的 373 本有一部分是这么来的。
+      if (_importing) {
+        lastImportSummary = '已有一批导入正在进行，请等待完成';
+        throw const GenericError('已有一批导入正在进行，请等它跑完再试。');
+      }
+      _importing = true;
 
       // 整批期间不生成封面，结束后统一在后台补（见 _scheduleCover 注释）
       _deferCovers = true;
@@ -774,6 +794,9 @@ class AppState extends ChangeNotifier {
   /// 实测（123云盘）显示单包耗时几乎全花在每个请求的往返延迟上
   /// （302 跳转导致一次请求两个 RTT），所以让更多请求同时在空中就是提速，
   /// 8 路配合连接池 16 基本能吃满带宽。
+  /// 是否有一批导入正在进行（防重入）
+  bool _importing = false;
+
   static const int _archiveImportConcurrency = 8;
 
   /// 后台**顺序**生成缺失的封面。
