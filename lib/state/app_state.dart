@@ -78,6 +78,7 @@ class AppState extends ChangeNotifier {
     books = _prefs.loadBooks();
     settings = _prefs.loadSettings();
     deepScanLibrary = _prefs.loadDeepScan();
+    zipPasswords = _prefs.loadZipPasswords();
     ready = true;
     notifyListeners();
 
@@ -694,7 +695,7 @@ class AppState extends ChangeNotifier {
         DocumentKind.web => BookKind.web,
         DocumentKind.doc => BookKind.doc,
       },
-      source: _sourceFor(pick),
+      source: _sourceFor(pick, archivePassword: archivePassword),
       pageCount: doc.pageCount,
       chapterCount: doc.chapterCount,
       importedAt: DateTime.now(),
@@ -929,7 +930,7 @@ class AppState extends ChangeNotifier {
     unawaited(_drainCovers());
   }
 
-  BookSource _sourceFor(SourcePick pick) {
+  BookSource _sourceFor(SourcePick pick, {String? archivePassword}) {
     switch (pick.kind) {
       case SourcePickKind.folder:
         return FolderSource(store.folderPathFor(pick.sourceId));
@@ -948,6 +949,9 @@ class AppState extends ChangeNotifier {
         return ArchiveSourceSpec(
           path: store.archivePathFor(
               pick.sourceId, p.basename(pick.path ?? 'book.zip')),
+          // ★ 必须写进去：加密 zip 的每一页都要解密才能读。
+          //   漏这一行，导入会成功、但一翻开就报"请输入密码"。
+          password: archivePassword,
         );
     }
   }
