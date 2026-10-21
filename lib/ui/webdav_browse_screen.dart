@@ -667,7 +667,7 @@ class _ConnectionFormState extends State<_ConnectionForm> {
           decoration: const InputDecoration(
             labelText: '服务器地址',
             hintText: '192.168.1.10:5006',
-            border: OutlineInputBorder(),
+
             prefixIcon: Icon(Icons.link),
             helperText: '飞牛 OS：设置 → 文件服务 → WebDAV（默认端口 5005 / 5006）'
                 '\n只填 IP:端口 也可以，http/https 会自动识别',
@@ -685,7 +685,7 @@ class _ConnectionFormState extends State<_ConnectionForm> {
           autocorrect: false,
           decoration: const InputDecoration(
             labelText: '用户名',
-            border: OutlineInputBorder(),
+
             prefixIcon: Icon(Icons.person_outline),
           ),
         ),
@@ -697,7 +697,7 @@ class _ConnectionFormState extends State<_ConnectionForm> {
           decoration: InputDecoration(
             labelText: '密码',
             helperText: '多数网盘的 WebDAV 密码要单独生成，不是登录密码',
-            border: const OutlineInputBorder(),
+
             prefixIcon: const Icon(Icons.lock_outline),
             suffixIcon: IconButton(
               icon: Icon(_obscure ? Icons.visibility_off : Icons.visibility),
@@ -711,7 +711,7 @@ class _ConnectionFormState extends State<_ConnectionForm> {
           decoration: const InputDecoration(
             labelText: '备注名（可选）',
             hintText: '家里的飞牛',
-            border: OutlineInputBorder(),
+
             prefixIcon: Icon(Icons.label_outline),
           ),
         ),

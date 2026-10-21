@@ -589,15 +589,18 @@ class _ReaderMenuOverlay extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     // 分层结构（避免"点按钮同时关闭菜单"的手势冲突）：
-    //   底层：半透明遮罩 + 点击关闭菜单
+    //   底层：半透明遮罩 —— **只负责变暗，不拦截手势**
     //   上层：顶栏 / 底栏（在自己的区域内吃掉手势）
+    //
+    // ★ 遮罩原来是 `HitTestBehavior.opaque` + `onTap: onClose`，
+    //   结果菜单一浮出，底下的翻页手势全被吃掉：想"边调设置边翻页看看效果"
+    //   完全做不到。现在改成 IgnorePointer，点击/拖动照常落在阅读区上，
+    //   关菜单交给 handleSingleTap 判断（中间区关，两侧区翻页）。
     return Positioned.fill(
       child: Stack(
         children: [
           Positioned.fill(
-            child: GestureDetector(
-              onTap: onClose,
-              behavior: HitTestBehavior.opaque,
+            child: IgnorePointer(
               child: ColoredBox(color: Colors.black.withValues(alpha: 0.18)),
             ),
           ),

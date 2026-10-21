@@ -206,10 +206,42 @@ class ReaderSettings {
 
   ThemeData themeData({required Brightness brightness}) {
     const seed = Color(0xFF5B7CFA);
+    final scheme = ColorScheme.fromSeed(seedColor: seed, brightness: brightness);
     return ThemeData(
-      colorScheme: ColorScheme.fromSeed(seedColor: seed, brightness: brightness),
+      colorScheme: scheme,
       useMaterial3: true,
       visualDensity: VisualDensity.standard,
+      // 全局统一圆角输入框。
+      //
+      // 之前每个 TextField 各写各的：有的 OutlineInputBorder() 是直角、
+      // 有的自己给 borderRadius、搜索框又是无边框 —— 同一个 app 里
+      // 出现三种输入框长相。这里定一次，所有输入框统一生效。
+      inputDecorationTheme: InputDecorationTheme(
+        filled: true,
+        fillColor: scheme.surfaceContainerHighest.withValues(alpha: 0.5),
+        contentPadding:
+            const EdgeInsets.symmetric(vertical: 12, horizontal: 14),
+        border: OutlineInputBorder(
+          borderRadius: BorderRadius.circular(12),
+          borderSide: BorderSide.none,
+        ),
+        enabledBorder: OutlineInputBorder(
+          borderRadius: BorderRadius.circular(12),
+          borderSide: BorderSide.none,
+        ),
+        focusedBorder: OutlineInputBorder(
+          borderRadius: BorderRadius.circular(12),
+          borderSide: BorderSide(color: scheme.primary, width: 1.5),
+        ),
+        errorBorder: OutlineInputBorder(
+          borderRadius: BorderRadius.circular(12),
+          borderSide: BorderSide(color: scheme.error, width: 1.2),
+        ),
+        focusedErrorBorder: OutlineInputBorder(
+          borderRadius: BorderRadius.circular(12),
+          borderSide: BorderSide(color: scheme.error, width: 1.5),
+        ),
+      ),
     );
   }
 

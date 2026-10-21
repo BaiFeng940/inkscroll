@@ -193,7 +193,7 @@ class _SettingsSheetState extends State<_SettingsSheet> {
                   dropdownColor: const Color(0xFF2A2A2A),
                   style: const TextStyle(color: Colors.white, fontSize: 13),
                   decoration: const InputDecoration(
-                    border: OutlineInputBorder(),
+
                     isDense: true,
                     contentPadding:
                         EdgeInsets.symmetric(horizontal: 12, vertical: 8),
