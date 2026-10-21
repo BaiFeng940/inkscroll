@@ -237,7 +237,7 @@ class WebDavClient {  WebDavClient({
   /// 太小会让"并行扫描"退回串行（请求排队等连接），
   /// 太大又会打爆家用 NAS 的弱 CPU / 家用上行带宽。
   /// 6 是实测比较平衡的值：扫描 5 路 + 嗅探 6 路都能跑满。
-  static const int maxConnectionsPerHost = 12;
+  static const int maxConnectionsPerHost = 16;
 
   http.Client _buildClient() {
     // ★ 不管是否自签，都走自建 HttpClient ——

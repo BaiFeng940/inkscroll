@@ -24,6 +24,7 @@ import '../data/importer.dart';
 import '../data/models/book_meta.dart';
 import '../data/models/reader_settings.dart';
 import '../data/pdf/pdf_native.dart';
+import '../data/import_lock.dart';
 import '../data/prefs_store.dart';
 import '../data/update_service.dart';
 import '../data/webdav/webdav_connection.dart';
@@ -201,6 +202,11 @@ class AppState extends ChangeNotifier {
 
       // 整批期间不生成封面，结束后统一在后台补（见 _scheduleCover 注释）
       _deferCovers = true;
+
+    // 允许后台加载：导入期间持有 CPU 唤醒锁 + Wi-Fi 高性能锁。
+    // 否则用户切到后台或息屏后，系统会降频 CPU 并把 Wi-Fi 打进省电模式，
+    // 几十本书的导入会明显变慢甚至被中断。
+    final locked = await acquireImportLock();
       try {
         // ── 并发导入 ──
         //
@@ -306,6 +312,7 @@ class AppState extends ChangeNotifier {
           if (meta != null) imported.add(meta);
         }
       } finally {
+    if (locked) await releaseImportLock();
         _deferCovers = false;
 
         // ★ 一次写盘 + 一次刷新。逐本 upsertBook + notifyListeners
@@ -762,8 +769,12 @@ class AppState extends ChangeNotifier {
   /// 每本书的耗时几乎全是网络往返（EOCD、中央目录、几张样本图的 Range），
   /// 串行等于把延迟直接累加 —— 170 本 × 2.5 s ≈ 7 分钟。
   /// 也不能开太高：HttpClient 的 maxConnectionsPerHost 是 6，
-  /// 而且每本书内部还有自己的抽样并发（4 路），4×4=16 已接近上限。
-  static const int _archiveImportConcurrency = 4;
+  /// 而且每本书内部还有自己的抽样并发（4 路）。
+  ///
+  /// 实测（123云盘）显示单包耗时几乎全花在每个请求的往返延迟上
+  /// （302 跳转导致一次请求两个 RTT），所以让更多请求同时在空中就是提速，
+  /// 8 路配合连接池 16 基本能吃满带宽。
+  static const int _archiveImportConcurrency = 8;
 
   /// 后台**顺序**生成缺失的封面。
   ///
