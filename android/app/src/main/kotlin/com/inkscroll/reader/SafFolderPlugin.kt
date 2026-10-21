@@ -2,9 +2,12 @@ package com.inkscroll.reader
 
 import android.app.Activity
 import android.content.ContentResolver
+import android.content.Context
 import android.content.Intent
 import android.net.Uri
+import android.net.wifi.WifiManager
 import android.os.Build
+import android.os.PowerManager
 import android.provider.DocumentsContract
 import io.flutter.plugin.common.MethodCall
 import io.flutter.plugin.common.MethodChannel
@@ -48,6 +51,16 @@ class SafFolderPlugin(
     }
 
     private val channel = MethodChannel(messenger, CHANNEL)
+
+    private var wakeLock: PowerManager.WakeLock? = null
+    private var wifiLock: WifiManager.WifiLock? = null
+
+    private fun releaseLocks() {
+        try { wakeLock?.takeIf { it.isHeld }?.release() } catch (_: Exception) {}
+        wakeLock = null
+        try { wifiLock?.takeIf { it.isHeld }?.release() } catch (_: Exception) {}
+        wifiLock = null
+    }
     private var pendingResult: MethodChannel.Result? = null
     private var pendingDestDir: String? = null
     private var pendingExtensions: List<String> = emptyList()
@@ -64,6 +77,42 @@ class SafFolderPlugin(
             // 为它加一个第三方依赖（连带版本解析与新平台实现）不划算。
             // ★ 必须判断 resolveActivity —— 某些精简 ROM 上没有浏览器时，
             //   直接 startActivity 会抛 ActivityNotFoundException 把应用带崩。
+            // 批量导入期间持有唤醒锁 + Wi-Fi 锁。
+            //
+            // 为什么需要：用户把应用切到后台（或息屏）时，Android 会逐步
+            // 降频 CPU、让 Wi-Fi 进入省电模式，几十本压缩包的导入就会变慢
+            // 甚至被系统掐断。加一把 PARTIAL_WAKE_LOCK（只保 CPU，不亮屏）
+            // 和一把 HIGH_PERF Wi-Fi 锁，导入期间就能稳定跑完。
+            //
+            // 带超时（30 分钟）是刻意的：万一 release 没被调到（崩了/被杀），
+            // 锁也会自己释放，不至于一直耗电。
+            "acquireImportLock" -> {
+                try {
+                    releaseLocks()
+                    val pm = activity.getSystemService(Context.POWER_SERVICE) as PowerManager
+                    wakeLock = pm.newWakeLock(
+                        PowerManager.PARTIAL_WAKE_LOCK,
+                        "inkscroll:import",
+                    ).apply { acquire(30L * 60L * 1000L) }
+
+                    val wm = activity.applicationContext
+                        .getSystemService(Context.WIFI_SERVICE) as WifiManager
+                    wifiLock = wm.createWifiLock(
+                        WifiManager.WIFI_MODE_FULL_HIGH_PERF,
+                        "inkscroll:import",
+                    ).apply { acquire() }
+
+                    result.success(true)
+                } catch (e: Exception) {
+                    result.error("lock_failed", e.message ?: "$e", null)
+                }
+            }
+
+            "releaseImportLock" -> {
+                releaseLocks()
+                result.success(true)
+            }
+
             "openUrl" -> {
                 val url = call.argument<String>("url")
                 if (url.isNullOrEmpty()) {
@@ -316,6 +365,7 @@ class SafFolderPlugin(
     }
 
     fun dispose() {
+        releaseLocks()
         channel.setMethodCallHandler(null)
     }
 }
