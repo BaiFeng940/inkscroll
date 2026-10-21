@@ -274,20 +274,6 @@ class ZipArchiveSource implements ArchiveSource {
       if (hit != null) return hit;
     }
 
-    if (entry.isEncrypted) {
-      // 加密条目的处理（诚实说明）：
-      //   - 传统 ZipCrypto（method 1/2）：纯 Dart 需要自己实现 CRC 校验的流密码，
-      //     本仓库暂未实现。
-      //   - AES（method 99）：必须 AE-1/AE-2 + HMAC 校验，纯 Dart 实现成本高。
-      // 两种情况都给出明确、可操作的错误，而不是试图"猜密码"。
-      throw const GenericError(
-        '这个压缩包是加密的。当前版本不支持解密压缩包（纯 Dart 无可靠的 '
-        'ZipCrypto / AES 实现）。\n'
-        '请先用 7-Zip / WinRAR 解压出未加密的 zip，或移除密码后再导入。',
-        action: ErrorAction.convertFile,
-      );
-    }
-
     final need = maxBytes == null
         ? entry.uncompressedSize
         : math.min(maxBytes, entry.uncompressedSize);
