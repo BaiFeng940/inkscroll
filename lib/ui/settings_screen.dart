@@ -38,6 +38,35 @@ class _SettingsScreenState extends State<SettingsScreen> {
   bool _checkingUpdate = false;
   String _updateLabel = '当前版本 $kAppVersion';
 
+  /// 统一的「说明」弹窗。
+  ///
+  /// 设置里原本把几段长说明直接铺在列表里，最长的一段占了三屏，
+  /// 把真正要操作的东西（连接列表、开关）挤到了看不见的地方。
+  /// 现在一律收进弹窗：列表只留一行标题 + 一行摘要。
+  Future<void> _showInfo({required String title, required String body}) async {
+    await showDialog<void>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        title: Text(title),
+        content: SizedBox(
+          width: 460,
+          child: SingleChildScrollView(
+            child: Text(
+              body,
+              style: const TextStyle(fontSize: 13.5, height: 1.7),
+            ),
+          ),
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.of(ctx).pop(),
+            child: const Text('知道了'),
+          ),
+        ],
+      ),
+    );
+  }
+
   /// 管理压缩包密码字典。
   ///
   /// 字典默认**空 = 不启用** —— 空的时候不会对加密压缩包做任何猜测，
@@ -270,92 +299,51 @@ class _SettingsScreenState extends State<SettingsScreen> {
           const Divider(height: 24),
 
           // ── 屏幕刷新率 ──
-          _SectionHeader('屏幕刷新率'),
-          Padding(
-            padding: const EdgeInsets.fromLTRB(16, 0, 16, 12),
-            child: RichText(
-              text: TextSpan(
-                style: TextStyle(
-                  fontSize: 12,
-                  height: 1.6,
-                  color: theme.hintColor,
-                ),
-                children: const [
-                  TextSpan(
-                    text: 'inkScroll 会主动向系统申请高刷新率，但 Android '
-                        '默认只给系统允许列表里的应用开高刷。\n\n',
-                  ),
-                  TextSpan(
-                    text: '需要你手动把本应用加进去：',
-                    style: TextStyle(fontWeight: FontWeight.w700),
-                  ),
-                  TextSpan(
-                    text: '\n打开 系统设置 → 显示与亮度 → 屏幕刷新率，'
-                        '找到「使用高刷新率的应用」（有的机型叫「高刷新率应用列表」'
-                        '或「选择应用」），把 inkScroll 打开。\n\n'
-                        '常见机型位置：\n'
-                        '· vivo / iQOO：设置 → 显示与亮度 → 屏幕刷新率 → '
-                        '使用高刷新率的应用\n'
-                        '· OPPO / 一加：设置 → 显示与亮度 → 屏幕刷新率 → 选择应用\n'
-                        '· 小米 / Redmi：设置 → 显示 → 高刷新率 → 应用列表\n'
-                        '· 华为 / 荣耀：设置 → 显示与亮度 → 屏幕刷新率\n\n',
-                  ),
-                  TextSpan(
-                    text: '找不到这个选项也不影响使用',
-                    style: TextStyle(fontWeight: FontWeight.w700),
-                  ),
-                  TextSpan(
-                    text: '：不动它照样能正常看书，只是滑动可能停在 60Hz。'
-                        '系统不允许应用自己绕过这个限制。',
-                  ),
-                ],
-              ),
+          ListTile(
+            leading: const Icon(Icons.speed_outlined),
+            title: const Text('屏幕刷新率'),
+            subtitle: const Text('想跑满 120Hz，需要你在系统设置里加白名单'),
+            trailing: const Icon(Icons.chevron_right),
+            onTap: () => _showInfo(
+              title: '屏幕刷新率',
+              body: 'inkScroll 会主动向系统申请高刷新率，但 Android 默认只给'
+                  '系统允许列表里的应用开高刷。\n\n'
+                  '需要你手动把本应用加进去：\n'
+                  '打开 系统设置 → 显示与亮度 → 屏幕刷新率，'
+                  '找到「使用高刷新率的应用」（有的机型叫「高刷新率应用列表」'
+                  '或「选择应用」），把 inkScroll 打开。\n\n'
+                  '常见机型位置：\n'
+                  '· vivo / iQOO：设置 → 显示与亮度 → 屏幕刷新率 → '
+                  '使用高刷新率的应用\n'
+                  '· OPPO / 一加：设置 → 显示与亮度 → 屏幕刷新率 → 选择应用\n'
+                  '· 小米 / Redmi：设置 → 显示 → 高刷新率 → 应用列表\n'
+                  '· 华为 / 荣耀：设置 → 显示与亮度 → 屏幕刷新率\n\n'
+                  '找不到这个选项也不影响使用：不动它照样能正常看书，'
+                  '只是滑动可能停在 60Hz。系统不允许应用自己绕过这个限制。',
             ),
           ),
 
           const Divider(height: 24),
 
-          // ── 通过压缩包导入 ──
-          _SectionHeader('通过压缩包导入'),
-          Padding(
-            padding: const EdgeInsets.fromLTRB(16, 0, 16, 8),
-            child: RichText(
-              text: TextSpan(
-                style: TextStyle(
-                  fontSize: 12,
-                  height: 1.6,
-                  color: theme.hintColor,
-                ),
-                children: const [
-                  TextSpan(
-                    text: '支持的格式：',
-                    style: TextStyle(fontWeight: FontWeight.w700),
-                  ),
-                  TextSpan(
-                    text: '.zip / .cbz（推荐）、.tar\n'
-                        '包内图片支持 JPG / PNG / GIF / WebP / BMP / AVIF。\n\n',
-                  ),
-                  TextSpan(
-                    text: '网盘上的压缩包也能直接导入：',
-                    style: TextStyle(fontWeight: FontWeight.w700),
-                  ),
-                  TextSpan(
-                    text: '不用先把压缩包下载到手机。导入时只读取压缩包的'
-                        '目录结构，翻到哪一页才下载那一页 —— '
-                        '200 MB 的包通常几秒就能建好，也不占手机空间。\n\n',
-                  ),
-                  TextSpan(
-                    text: '需要一点耐心：',
-                    style: TextStyle(fontWeight: FontWeight.w700),
-                  ),
-                  TextSpan(
-                    text: '每本压缩包都要联网读目录并抽样测量图片尺寸，'
-                        '所以导入一个几十本的库通常要几分钟。'
-                        '进度条会显示当前处理到第几本；'
-                        '请保持应用在前台、耐心等待，中途退出会中断这一批导入。',
-                  ),
-                ],
-              ),
+          // ── 压缩包 ──
+          ListTile(
+            leading: const Icon(Icons.folder_zip_outlined),
+            title: const Text('压缩包导入说明'),
+            subtitle: const Text('支持格式、网盘压缩包、导入耗时与加密'),
+            trailing: const Icon(Icons.chevron_right),
+            onTap: () => _showInfo(
+              title: '通过压缩包导入',
+              body: '支持的格式：.zip / .cbz（推荐）、.tar\n'
+                  '包内图片支持 JPG / PNG / GIF / WebP / BMP / AVIF。\n\n'
+                  '网盘上的压缩包也能直接导入：不用先下载到手机。'
+                  '导入时只读目录结构，翻到哪一页才下载那一页 —— '
+                  '200 MB 的包通常几秒就能建好，也不占手机空间。\n\n'
+                  '需要一点耐心：每本压缩包都要联网读目录并抽样测量尺寸，'
+                  '导入几十本的库通常要几分钟。进度条会显示处理到第几本；'
+                  '请保持应用在前台，中途退出会中断这一批导入。\n\n'
+                  '加密压缩包（ZipCrypto）需要密码，可以在下面的「密码字典」里'
+                  '预先添加，导入时会自动按顺序尝试。'
+                  'AES-256 加密暂不支持。',
             ),
           ),
 
@@ -413,31 +401,25 @@ class _SettingsScreenState extends State<SettingsScreen> {
 
           // ── 在线库 ──
           _SectionHeader('在线库（WebDAV 网盘）'),
-          Padding(
-            padding: const EdgeInsets.fromLTRB(16, 0, 16, 8),
-            child: RichText(
-              text: TextSpan(
-                style: TextStyle(
-                  fontSize: 12,
-                  height: 1.55,
-                  color: theme.hintColor,
-                ),
-                children: const [
-                  TextSpan(
-                    text: '任何标准 WebDAV 服务都能连：'
-                        '私有云（飞牛、群晖、威联通、TrueNAS）与商用网盘'
-                        '（坚果云、Nextcloud、Alist 等）。\n'
-                        '连接后选一个目录，它下面',
-                  ),
-                  TextSpan(
-                    text: '每个含图片的子文件夹',
-                    style: TextStyle(fontWeight: FontWeight.w700),
-                  ),
-                  TextSpan(text: '都会成为在线库里的一本书；目录里的 zip/cbz 压缩包也算一本。'),
-                ],
-              ),
+
+          // 说明收进弹窗：这段文字原来占了近 3 屏，把连接列表挤到看不见
+          ListTile(
+            leading: const Icon(Icons.info_outline),
+            title: const Text('支持哪些网盘？'),
+            subtitle: const Text('WebDAV 通用：私有云与商用网盘都能连'),
+            trailing: const Icon(Icons.chevron_right),
+            onTap: () => _showInfo(
+              title: '支持的网盘',
+              body: '任何标准 WebDAV 服务都能连：\n\n'
+                  '· 私有云：飞牛 fnOS、群晖、威联通、TrueNAS\n'
+                  '· 商用网盘：123云盘、坚果云、Nextcloud、Alist\n\n'
+                  '百度网盘、阿里云盘这类「不自带 WebDAV」的，需要先用 '
+                  'Alist 之类的网关转成 WebDAV 再连。\n\n'
+                  '连接后选一个目录：它下面每个含图片的子文件夹都会成为一本书；'
+                  '目录里的 zip / cbz 压缩包也算一本。',
             ),
           ),
+
 
           // 「合集」结构识别（默认开启）
           SwitchListTile(
@@ -553,7 +535,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
           const ListTile(
             leading: Icon(Icons.info_outline),
             title: Text('inkScroll'),
-            subtitle: Text('版本 0.11.1 · 本地与网盘漫画阅读器\n'
+            subtitle: Text('版本 0.11.2 · 本地与网盘漫画阅读器\n'
                 '不收集任何数据；只有你主动连接网盘时才有网络请求'),
             isThreeLine: true,
           ),
