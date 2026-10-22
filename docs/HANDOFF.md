@@ -134,12 +134,15 @@ POST https://uploads.github.com/repos/BaiFeng940/inkscroll/releases/{id}/assets?
 **GitCode 的 release 资产只能由用户手动上传**（接口不存在，见 §5）。流程：
 
 1. 我推代码 + tag
-2. **用户在网页建 release，把 `dist/` 里两个 APK 一起拖进去**
-   <https://gitcode.com/BaiFeng940/inkscroll/releases/new>
+2. **release 对象本身可以用 API 建**（0.14.0 实测：`POST /api/v5/repos/<owner>/<repo>/releases?access_token=…`，
+   body 传 `tag_name/name/body/target_commitish`，返回 200；但响应里**没有 release_id**，
+   附件接口依旧 404）。所以：
+   **用户在网页上只需要"把 `dist/` 里的两个 APK 拖进已建好的 release"**
+   <https://gitcode.com/BaiFeng940/inkscroll/releases>
 3. 我校验：
 
 ```powershell
-powershell.exe -NoProfile -ExecutionPolicy Bypass -File tool\verify-gitcode-release.ps1 -Version 0.13.1
+powershell.exe -NoProfile -ExecutionPolicy Bypass -File tool\verify-gitcode-release.ps1 -Version 0.14.0
 ```
 
 ---
@@ -258,7 +261,9 @@ android/app/src/main/kotlin/com/inkscroll/reader/
 
 | 坑 | 说明 |
 |---|---|
-| **GitCode 的 release 附件上传接口不存在** | `/releases/{tag}/attach_files`、`/upload_assets`、`/releases/assets` 全部 404 或 405；release 对象**不返回 `release_id`**。只能网页手传 |
+| **GitCode 的 release 附件上传接口不存在** | `/releases/{tag}/attach_files`、`/upload_assets`、`/releases/assets` 全部 404 或 405；release 对象**不返回 `release_id`**。只能网页手传。**但 release 对象本身能用 `POST /releases` 建**（0.14.0 实测 200） |
+| **GitCode 的 `/raw/<分支>/<路径>` 返回 SPA 的 HTML** | 0.14.0 实测：HTTP 200、5792 字节、`<!DOCTYPE html>`，**不是文件内容** —— 拿它核对"代码推上去没有"会得到假结果。改用 `git fetch` 后比 **tree sha**（内容寻址，天然逐字节） |
+| **GitCode 的 `main` 与 GitHub 是两条链** | GitHub 走 API 建提交 → sha 必然不同；GitCode 原来是本地链。推 `main` 要 `push -f`，推 tag 不用 |
 | **GitCode 对 `HEAD` 返回 401** | 看起来像"文件下不了"，其实 `GET` 是 200 并重定向到 `file-cdn.gitcode.com`。**一律用 GET 判断** |
 | GitCode release 的源码包不是安装包 | `v0.8.0.zip/.tar.gz` 是 `type:"source"`，任何 tag 自动生成；APK 是 `type:"attach"` |
 | 123云盘 `GET` 会 302 到签名 CDN | `package:http` 跟随后 **`Range` 头仍在**，返回 206 精确字节 |
