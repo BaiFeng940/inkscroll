@@ -41,6 +41,7 @@ Future<WebDavFolderSelection?> showWebDavBrowser({
   required WebDavConnectionStore store,
   WebDavConnection? presetConnection,
   bool libraryMode = false,
+  bool mergeCollections = false,
 }) {
   return Navigator.of(context).push<WebDavFolderSelection>(
     MaterialPageRoute(
@@ -48,6 +49,7 @@ Future<WebDavFolderSelection?> showWebDavBrowser({
         store: store,
         presetConnection: presetConnection,
         libraryMode: libraryMode,
+        mergeCollections: mergeCollections,
       ),
     ),
   );
@@ -59,6 +61,7 @@ class WebDavBrowseScreen extends StatefulWidget {
     required this.store,
     this.presetConnection,
     this.libraryMode = false,
+    this.mergeCollections = false,
   });
 
   final WebDavConnectionStore store;
@@ -68,6 +71,12 @@ class WebDavBrowseScreen extends StatefulWidget {
 
   /// 库模式：选中的目录会被展开成"多个含图片的子文件夹"批量导入
   final bool libraryMode;
+
+  /// 「合并合集」开关的状态：只影响底部那句提示文案（合集会合成一本书）。
+  ///
+  /// 真正的合并发生在 `AppState.importWebDavLibrary` → `scanLibrary` 里，
+  /// 这里传进来是为了不让界面**说反话**（开着合并还写"每个都是一本书"）。
+  final bool mergeCollections;
 
   @override
   State<WebDavBrowseScreen> createState() => _WebDavBrowseScreenState();
@@ -520,12 +529,17 @@ class _WebDavBrowseScreenState extends State<WebDavBrowseScreen> {
 
     // 库模式下即使当前目录没有图片也可以导入 ——
     // 真正要导入的是**子文件夹**里的内容。
+    // 开了「合并合集」时措辞要跟着变，否则界面在说反话。
+    final merged = widget.mergeCollections;
     final subtitle = lib
         ? (count > 0 && dirCount > 0
             ? '本目录 $count 张图 + $dirCount 个子文件夹，全部会成为在线库里的书'
             : count > 0
                 ? '本目录 $count 张图，会成为在线库里的一本书'
-                : '会扫描这里的 $dirCount 个子文件夹，每个含图片的都成为一本书')
+                : merged
+                    ? '会扫描这里的 $dirCount 个子文件夹：'
+                        '合集会合成一本书（按章节切换），其余每本一本'
+                    : '会扫描这里的 $dirCount 个子文件夹，每个含图片的都成为一本书')
         : '导入后需要联网阅读，看过的页会自动缓存';
 
     return SafeArea(

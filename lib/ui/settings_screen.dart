@@ -538,7 +538,10 @@ class _SettingsScreenState extends State<SettingsScreen> {
           const ListTile(
             leading: Icon(Icons.info_outline),
             title: Text('inkScroll'),
-            subtitle: Text('版本 0.13.1 · 本地与网盘漫画阅读器\n'
+            // ★ 必须用 kAppVersion：0.14.0 之前这里是**硬编码**的 "版本 0.13.1"，
+            //   于是「检查更新」显示 0.14.0、下面一行还写着 0.13.1（真机上发现的）。
+            //   现在 test/app_version_test.dart 会检查这里不许再出现写死的版本号。
+            subtitle: Text('版本 $kAppVersion · 本地与网盘漫画阅读器\n'
                 '不收集任何数据；只有你主动连接网盘时才有网络请求'),
             isThreeLine: true,
           ),
@@ -629,6 +632,8 @@ class _SettingsScreenState extends State<SettingsScreen> {
       presetConnection: preset,
       // 库模式：选中的目录会被展开成"多个含图片的子文件夹"
       libraryMode: true,
+      // 底部那句话要跟着「合并合集」变，否则开着合并却写着"每个都是一本书"
+      mergeCollections: app.mergeCollections,
     );
     if (selection == null || !mounted) return;
 
