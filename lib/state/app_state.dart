@@ -79,6 +79,7 @@ class AppState extends ChangeNotifier {
     books = _prefs.loadBooks();
     settings = _prefs.loadSettings();
     deepScanLibrary = _prefs.loadDeepScan();
+    mergeCollections = _prefs.loadMergeCollections();
     zipPasswords = _prefs.loadZipPasswords();
     ready = true;
     notifyListeners();
@@ -141,6 +142,7 @@ class AppState extends ChangeNotifier {
         client,
         folderUrl,
         deepScan: deepScanLibrary,
+        mergeCollections: mergeCollections,
         onProgress: (done, total, name) {
           _setProgress(
             total == 0 ? 0 : done / total * 0.4,
@@ -151,7 +153,8 @@ class AppState extends ChangeNotifier {
       );
 
       lastImportSummary = '扫描到 ${candidates.length} 个候选'
-          '（压缩包 ${candidates.where((c) => c.isArchive).length}）';
+          '（压缩包 ${candidates.where((c) => c.isArchive).length}'
+          '，合集 ${candidates.where((c) => c.isCollection).length}）';
       if (candidates.isEmpty) {
         _setProgress(null, '');
         return WebDavLibraryResult(
@@ -252,7 +255,30 @@ class AppState extends ChangeNotifier {
             final c = fresh[i];
             final localBatch = <BookMeta>[];
             try {
-              if (c.isArchive) {
+              if (c.isCollection) {
+                // ★ 合并合集：一个合集 = 一本书，每一话 = 一个章节。
+                //
+                // 关掉开关时扫描根本不会产出这种候选，所以这段不影响老行为。
+                // 章节内的页 id 已在 buildMergedCollection 里加了章前缀，
+                // 这里只管落盘。
+                final doc = await WebDavFolderImporter.buildMergedCollection(
+                  conn: connection,
+                  client: client,
+                  candidate: c,
+                );
+                // 来源记**合集目录**：既方便之后判重，也让重建文档时
+                // 能顺着这个目录再扫出各话（见 buildDocument 的兜底）。
+                final pick = SourcePick(
+                  kind: SourcePickKind.webdav,
+                  displayName: c.name,
+                  sourceId: ByteStore.newBookId(),
+                  uri: Uri.tryParse(c.url),
+                  webdavConnectionId: connection.id,
+                  webdavFolderUrl: c.url,
+                  webdavFolderName: c.name,
+                );
+                results[i] = await _persist(pick, doc, batch: localBatch);
+              } else if (c.isArchive) {
                 // ★ 网盘上的压缩包：一本书 = 一个包。
                 //   只读中央目录 + 少量样本，不解压整包。
                 final bookId = ByteStore.newBookId();
@@ -775,6 +801,18 @@ class AppState extends ChangeNotifier {
   Future<void> setDeepScanLibrary(bool value) async {
     deepScanLibrary = value;
     await _prefs.saveDeepScan(value);
+    notifyListeners();
+  }
+
+  /// 「合并合集」：一个合集 = 一本书，每一话 = 一个章节。
+  ///
+  /// 默认**关**（每话一本，与以前完全一样）。开关只管"重新导入时怎么建书"，
+  /// 已经导入的书不会被改写 —— 打开时仍按各自的 document.json 读。
+  bool mergeCollections = false;
+
+  Future<void> setMergeCollections(bool value) async {
+    mergeCollections = value;
+    await _prefs.saveMergeCollections(value);
     notifyListeners();
   }
 

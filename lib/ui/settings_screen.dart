@@ -433,6 +433,17 @@ class _SettingsScreenState extends State<SettingsScreen> {
             onChanged: (v) => app.setDeepScanLibrary(v),
           ),
 
+          // 「合并合集」（默认关闭 = 每话一本，与以前一致）
+          SwitchListTile(
+            secondary: const Icon(Icons.merge_type),
+            title: const Text('合并合集'),
+            subtitle: const Text(
+              '开启后，合集内各话合并成一本书，按章节切换；关闭则每话一本',
+            ),
+            value: app.mergeCollections,
+            onChanged: (v) => app.setMergeCollections(v),
+          ),
+
           if (conns.isEmpty)
             Padding(
               padding: const EdgeInsets.fromLTRB(16, 8, 16, 8),

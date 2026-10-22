@@ -150,6 +150,20 @@ class PrefsStore {
   Future<void> saveDeepScan(bool value) async {
     await _prefs.setBool(_kDeepScan, value);
   }
+
+  /// 「合并合集」开关（默认**关**）。
+  ///
+  /// 关 = 合集里的每一话各成一本书（`XX 第一话` / `XX 第二话`）——
+  /// 这是既有行为，默认必须保持原样。
+  /// 开 = 一个合集一本书，各话成为章节。
+  static const _kMergeCollections = 'library.mergeCollections.v1';
+
+  bool loadMergeCollections() => _prefs.getBool(_kMergeCollections) ?? false;
+
+  Future<void> saveMergeCollections(bool value) async {
+    await _prefs.setBool(_kMergeCollections, value);
+  }
+
   Future<void> setCover(String bookId, String coverPath) async {
     final books = loadBooks();
     final i = books.indexWhere((b) => b.id == bookId);

@@ -30,6 +30,7 @@ import '../core/image_header.dart';
 import '../data/webdav/webdav_client.dart';
 import 'document.dart';
 import 'page_cache.dart';
+import 'webdav_archive_resolver.dart';
 
 class WebDavPageByteResolver implements PageByteResolver {
   WebDavPageByteResolver({
@@ -63,12 +64,54 @@ class WebDavPageByteResolver implements PageByteResolver {
   int diskHits = 0;
   int networkFetches = 0;
 
+  /// 压缩包页的子解析器（按包 URL 懒创建，一个包一个）
+  ///
+  /// ## 为什么需要它
+  ///
+  /// 「合并合集」里一话可能是一个压缩包（`XX合集/第一话.zip`），
+  /// 合并之后**同一本书里既有直接图片页（[WebDavRef]）也有包内页
+  /// （[WebDavArchiveRef]）**。
+  ///
+  /// 只认 [WebDavRef] 的话，这些章节一翻就报"页内容引用类型与网络来源不匹配"
+  /// —— 而且书架、章节菜单、总页数全都是对的，只有画面出不来。
+  ///
+  /// 子解析器共享同一个 [client] 与磁盘缓存目录，不会多握手、不会重复落盘。
+  final _archiveResolvers = <String, WebDavArchivePageResolver>{};
+
+  WebDavArchivePageResolver _archiveResolverFor(WebDavArchiveRef ref) {
+    final existing = _archiveResolvers[ref.archiveUrl];
+    if (existing != null) return existing;
+    final created = WebDavArchivePageResolver(
+      client: client,
+      archiveUrl: ref.archiveUrl,
+      cacheDir: cacheDir,
+      pages: _pages,
+    );
+    _archiveResolvers[ref.archiveUrl] = created;
+    return created;
+  }
+
+  /// 这一页是不是"网盘压缩包里的条目"
+  static WebDavArchiveRef? _archiveRefOf(PageNode page) {
+    final content = page.content;
+    if (content is ImageContent && content.ref is WebDavArchiveRef) {
+      return content.ref as WebDavArchiveRef;
+    }
+    return null;
+  }
+
   // ------------------------------------------------------------------
   // PageByteResolver
   // ------------------------------------------------------------------
 
   @override
   Future<Uint8List> imageBytes(PageNode page) {
+    // 包内页：交给按包的子解析器（它会读 zip 中央目录 + 具体条目）
+    final archiveRef = _archiveRefOf(page);
+    if (archiveRef != null) {
+      return _archiveResolverFor(archiveRef).imageBytes(page);
+    }
+
     final hit = _cache.get(page.id);
     if (hit != null) {
       memoryHits++;
@@ -127,6 +170,11 @@ class WebDavPageByteResolver implements PageByteResolver {
 
   @override
   Future<Uint8List> peekBytes(PageNode page, {int bytes = 192 * 1024}) async {
+    final archiveRef = _archiveRefOf(page);
+    if (archiveRef != null) {
+      return _archiveResolverFor(archiveRef).peekBytes(page, bytes: bytes);
+    }
+
     final ref = _refOf(page);
     final cachedFile = _fileFor(ref.url);
     if (await cachedFile.exists()) {
@@ -145,6 +193,10 @@ class WebDavPageByteResolver implements PageByteResolver {
 
   @override
   Future<void> dispose() async {
+    for (final r in _archiveResolvers.values) {
+      await r.dispose();
+    }
+    _archiveResolvers.clear();
     client.close();
   }
 
@@ -162,6 +214,8 @@ class WebDavPageByteResolver implements PageByteResolver {
         if (i < 0 || i >= _pages.length) continue;
         final p = _pages[i];
         if (_cache.get(p.id) != null) continue;
+        // 包内页由各自的子解析器预取（这里 _refOf 会抛类型不匹配）
+        if (_archiveRefOf(p) != null) continue;
         if (_diskDone.contains(p.id)) continue;
         if (_inflight.containsKey(p.id) || _diskInflight.containsKey(p.id)) {
           continue;
