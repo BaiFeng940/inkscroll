@@ -1,8 +1,8 @@
 # inkScroll 交接文档
 
-> 面向"新开一个会话继续开发"的场景。包含环境、架构、已完成、**待做的三项（含设计）**、
+> 面向"新开一个会话继续开发"的场景。包含环境、架构、已完成、**待做的两项（含设计）**、
 > 踩过的坑、以及可直接粘贴的提示词。
-> 当前版本：**0.13.1**（2026-10）
+> 当前版本：**0.14.0**（2026-10）
 
 ---
 
@@ -230,6 +230,7 @@ android/app/src/main/kotlin/com/inkscroll/reader/
 | 0.12.1 | 删「不在家时怎么连」/ 嵌套扫描并发 / 302 瓶颈定位 | 编译 ✅ |
 | 0.13.0 | **后台导入（唤醒锁）+ 并发 8** | 真机 ✅ 174 本 / 149 秒 |
 | 0.13.1 | 修复重复导入（判重漏了压缩包） | 编译 + 逻辑审查 |
+| 0.14.0 | **合并合集**（一个合集 = 一本书，每话 = 章节） | 真实网盘 ✅ 194→149 本 / 账目对齐 |
 
 实测数据（123云盘，真实账号）：
 
@@ -247,7 +248,7 @@ android/app/src/main/kotlin/com/inkscroll/reader/
 
 | 坑 | 说明 |
 |---|---|
-| **Python 改 Dart 文件会写坏换行** | 用 `io.open(..., newline="\r\n")` 且内容里已有 `\n` 时，`\n` 被再转义 → 每行之间多一个空行（`\r\r\n`）。`webdav_folder_importer.dart` 目前就是这个状态（能编译但行数翻倍）。**优先用 `edit` 工具改源码**，必须用 Python 时用 `newline=""` 且自己做换行归一 |
+| **Python 改 Dart 文件会写坏换行** | 用 `io.open(..., newline="\r\n")` 且内容里已有 `\n` 时，`\n` 被再转义 → 每行之间多一个空行（`\r\r\n`）。**优先用 `edit` 工具改源码**，必须用 Python 时用 `newline=""` 且自己做换行归一。⚠️ 这种文件用 `edit` 会**匹配不上**（工具看到的是归一化后的文本），0.14.0 已把 `webdav_folder_importer.dart` 修复为纯 LF（逐字节校验过：除行尾外内容完全一致），其余源码本来就是 LF |
 | 文本匹配插入不可靠 | 注释里常出现同名字符串（如 `_deferCovers = true;`），会插错位置。用**行号 + assert**，并自底向上改 |
 | 文件混用 CRLF/LF | 先统计 `\r\n` 与 `\n` 的占比再决定分隔符，否则行号全错 |
 | PowerShell 5.1 | 无三元、`if` 不能当表达式、中文全角引号会炸、`Set-Content -Encoding UTF8` 会写 BOM（要 BOM 时反而要用它）、`Get-Content` 返回 PSObject |
@@ -262,6 +263,7 @@ android/app/src/main/kotlin/com/inkscroll/reader/
 | GitCode release 的源码包不是安装包 | `v0.8.0.zip/.tar.gz` 是 `type:"source"`，任何 tag 自动生成；APK 是 `type:"attach"` |
 | 123云盘 `GET` 会 302 到签名 CDN | `package:http` 跟随后 **`Range` 头仍在**，返回 206 精确字节 |
 | 123云盘 `PROPFIND` 带 XML 体返回 404 | 先发空体（RFC 4918 允许），400/415 再带体重试 |
+| **123云盘并发 `PROPFIND` 会回「207 + 空列表」** | **不报错**，只是那个目录"看起来是空的"。实测一次扫描 41 个请求里 16~17 个是空的 → 同一账号导入数量每次都不一样（194 / 169 / 141 本），而**串行扫 6 次都稳定 194**。只 `catch` 重试没用（它没抛异常），必须把"空结果"也当可疑信号重试。0.14.0 的 `WebDavFolderImporter._listWithRetry` 就是干这个的（空/异常都退避重试 3 次），修完连测 3 次稳定 |
 | fnOS 同样拒绝带体 PROPFIND | 同上处理 |
 | 飞牛网页端口 5666 ≠ WebDAV 端口 5005/5006 | 填错会报"不是 WebDAV 服务" |
 | 302 缓存直连 CDN **实测无收益** | 已试过并回滚（`webdav_client.dart`）。CDN 签名地址本身还会再跳，缓存反而多一次请求 |
@@ -290,88 +292,95 @@ GitHub PAT / GitCode token：向用户索取，用完建议删除
 
 ---
 
-## 6. 待做三项（含完整设计）
+## 6. 待做（0.14.0 后剩两项）
 
-### 6.1 【主任务】合并合集
+> 6.1「合并合集」已于 **0.14.0 完成**，保留在下面作为实现记录与坑位清单。
 
-**现状**：`漫画根目录/XX合集/第一话/` 导入后是**两本独立的书**，命名 `XX 第一话`
+### 6.1 ✅ 合并合集（0.14.0 已完成）
+
+**现状（0.14.0 之前）**：`漫画根目录/XX合集/第一话/` 导入后是**两本独立的书**，命名 `XX 第一话`
 （命名规则在 0.12.0 已实现，函数 `collectionBookName`）。
 
-**目标**：新增设置「合并合集」。开启后，一个合集 = **一本书**，每一话 = **一个章节**。
+**已实现**：设置 → 在线库 →「合并合集」（默认**关**）。
+开启后一个合集 = **一本书**（书名 `XX`，去掉「合集」二字），每一话 = **一个章节**，
+章节菜单可切换、跨话翻页连续；关闭时行为与以前**完全一致**。
 
-**数据模型**（`lib/importers/webdav_folder_importer.dart`）
+**真实网盘实测**（123云盘真实账号，`test/real_scan_manual_test.dart`）：
+
+```
+关闭合并：194 本（全部是压缩包）
+开启合并：149 本（合集 29 本 + 散本 120 本）
+折叠进合集的"话"：74 个
+对账：194 = 149 − 29 + 74      ← 没有丢话、没有重复
+最大合集：【】竹本 → 6 章 / 173 页（章名 Dream Up、EX档案、Fire up…）
+```
+
+> 交接文档原来写的"约 38 本 / 174 本"是**当时账号的结构**（每个合集是一个图片子目录）。
+> 现在这个账号里"话"绝大多数是**合集目录下的 zip**（`XX合集/第一话.zip`），
+> 所以是 29 个合集、194 话。判断标准请用**"一个合集恰好一本书"**，不要盯固定总数。
+
+**数据模型**（`lib/importers/webdav_folder_importer.dart`）——**已实现**
 
 ```dart
 class WebDavComicCandidate {
   // 现有字段保持不变：url / name / images / isArchive / archiveSize
-  final List<WebDavCollectionChapter> chapters;   // 新增
-  bool get isCollection => chapters.isNotEmpty;  // 新增
+  final List<WebDavCollectionChapter> chapters;   // 新增，默认 const []
+  bool get isCollection => chapters.isNotEmpty;   // 新增
 }
 
-class WebDavCollectionChapter {                  // 新增
+class WebDavCollectionChapter {                   // 新增
   const WebDavCollectionChapter({
     required this.title, required this.url, required this.images,
+    this.isArchive = false, this.archiveSize,     // 新增：话是 zip 时用
   });
   final String title;              // 「第一话」
-  final String url;                // 子目录 URL
-  final List<WebDavEntry> images;  // 该话的图（已按自然序排好）
+  final String url;                // 子目录 **或压缩包** URL
+  final List<WebDavEntry> images;  // 该话的图（已按自然序排好）；zip 话为空
 }
 ```
 
-**改动清单**
+> ⚠️ `isArchive` / `archiveSize` 是**原设计漏掉的一半**：真实库里 `XX合集/第一话.zip`
+> 这种"一话一个包"才是主流（实测 74 话里几乎全是 zip）。只按原设计的
+> `title/url/images` 实现，这些合集会被扫成 0 章。
+
+**改动清单**（全部已落地）
 
 | # | 文件 | 改动 |
 |---|---|---|
 | 1 | `lib/data/prefs_store.dart` | 新增 `mergeCollections`（默认 **false**），键 `library.mergeCollections.v1`；`loadMergeCollections()` / `saveMergeCollections()` |
-| 2 | `lib/state/app_state.dart` | ① 字段 `bool mergeCollections` + `setMergeCollections()`，bootstrap 里读<br>② `scanLibrary(..., mergeCollections: mergeCollections)`<br>③ 导入循环里：`if (c.isCollection)` → 走合并分支，`continue` |
-| 3 | `lib/importers/webdav_folder_importer.dart` | ① `_scanOneLevel` 增加参数 `mergeCollections`；开启时**整个合集只返回 1 个候选**，`chapters` 填各子目录（子目录内的图片/压缩包都要支持）<br>② 新增 `buildMergedCollection({conn, client, candidate})`：逐话调用现有 `_build(ctx:null, client:c, conn:conn, folderUrl:ch.url, folderName:ch.title, images:ch.images)` 拿到 Document，再把页 id 重写为 `c{章号}_{原id}` 合并<br>③ `scanLibrary` 透传该参数 |
+| 2 | `lib/state/app_state.dart` | ① 字段 `bool mergeCollections` + `setMergeCollections()`，bootstrap 里读<br>② `scanLibrary(..., mergeCollections: mergeCollections)`<br>③ 导入循环里：`if (c.isCollection)` → 走合并分支（`else if (c.isArchive)`，同样落盘）<br>④ 「上次导入」摘要里加"合集 N" |
+| 3 | `lib/importers/webdav_folder_importer.dart` | ① `_scanOneLevel` 增加参数 `mergeCollections`；开启且本层没图时**整个合集只返回 1 个候选**<br>② 新增 `_scanChapters()`：**4 路并发**扫各话（图片子目录 / 定目录下的 zip / 子目录里的 zip 三种都收），读完按章节名自然序排序<br>③ 新增 `buildMergedCollection({conn, client, candidate})`：逐话调用 `_build(ctx:null, …)`（zip 话走 `WebDavArchiveImporter.buildDocument`）<br>④ 新增**纯函数** `mergeDocuments()`：页 id 重写为 `c{章号}_{原id}` 后合并（便于单测）<br>⑤ `scanLibrary` 透传该参数；`buildFromCandidate` 遇到合集候选自动转交<br>⑥ `buildDocument` 的兜底：合集目录自己没有图时按章节重建（document.json 丢了也能打开） |
 | 4 | `lib/ui/settings_screen.dart` | 在线库区块加一个 `SwitchListTile`：<br>标题「合并合集」<br>副标题「开启后，合集内各话合并成一本书，按章节切换；关闭则每话一本」 |
 
 **合并后的 Document 构造要点**
 
 ```dart
-final pages = <String, PageNode>{};
-final chapters = <Chapter>[];
-var ci = 0;
-for (final ch in candidate.chapters) {
-  final doc = await _build(ctx: null, client: client, conn: conn,
-      folderUrl: ch.url, folderName: ch.title, images: ch.images);
-  final ids = <String>[];
-  for (final p in doc.pagesInOrder) {
-    final id = 'c${ci}_${p.id}';           // 避免不同话的 p0 撞车
-    pages[id] = PageNode(id: id, kind: p.kind, content: p.content,
-        aspectRatio: p.aspectRatio, title: p.title);
-    ids.add(id);
-  }
-  chapters.add(Chapter(index: ci, title: ch.title, pageIds: ids));
-  ci++;
-}
-return Document(
-  id: 'doc-${candidate.url.hashCode}',
-  bookId: candidate.url,           // 会被 _persist 覆盖
-  title: candidate.name,           // 「XX」（已去「合集」二字）
-  kind: DocumentKind.comic,
-  chapters: chapters,
-  pages: pages,
-  unit: ReadingUnit.page,
-  hint: DocumentLayoutHint.pagePreferred,
-);
+// 实际实现见 WebDavFolderImporter.mergeDocuments
+final id = 'c${chapterIndex}_${p.id}';   // ★ 不加前缀，第二话的 n:0 会顶掉第一话第一页
+// chapterIndex 取"已加进来的章节数"，空话被跳过时章号也不会错位
 ```
 
-**验收标准**
+**实测结果**（对应原验收标准）
 
-1. 开启开关 → 重新导入 → 书架显示约 **38 本**（每个合集一本），书名不带「合集」
-2. 打开其中一本 → 章节菜单显示各话；翻页跨话连续，进度正确
-3. 关闭开关 → 重新导入 → 回到 **174 本**，命名 `XX 第一话`
-4. 合集下的 zip（而不是图片文件夹）也要能合并成章节
-5. `flutter analyze` 0 issue、`flutter test` 全绿（当前 92）
+1. ✅ 开启开关 → 重新导入 → 每个合集 1 本，书名 `XX`（不带「合集」）
+2. ✅ 打开 → `chapterCount` 与扫描到的话数一致、页数连续（单测断言 `pages.length == pageCount`）
+3. ✅ 关闭开关 → 回到"每话一本"，命名仍是 `XX 第一话`
+4. ✅ 合集下的 zip 能合并成章节（`isArchive` 章节，走 `WebDavArchiveImporter`）
+5. ✅ `flutter analyze` 0 issue；`flutter test` **103 passed / 3 skipped**（skip 的是手动真网盘用例）
 
-**坑位提醒**
+**坑位提醒**（0.14.0 实际踩到的）
 
 - `_build` 是 `static Future<Document>`，参数 `ctx` 可传 `null`
-- 现有 `_scanOneLevel` 的嵌套循环已经改并发（4 路），合并时**不要退回串行**
-- 去重集合现在按 `folderUrl` / `archiveUrl` 判重；合并后一本书的 `url` 用合集目录，
-  需保证**关闭合并再导入**时不会把同一批内容当新书 —— 建议 key 用合集目录 URL
+- `_scanChapters` 与 `_scanOneLevel` 都是 **4 路并发**，合并时**没有退回串行**
+  （总并发仍是 5 × 4，与改动前一致）
+- 判重 key 用**合集目录 URL**：开启状态下重复「添加为库」只会跳过，不会产生重复书
+- 页 id 撞车是最隐蔽的坑：总页数**看起来还是对的**，只有"第二话开始内容变少"这种怪象
+- **合并后同一本书里会同时出现直链图片页（`WebDavRef`）和包内页（`WebDavArchiveRef`）**。
+  `WebDavPageByteResolver` 原来只认前者，遇到后者直接抛"页内容引用类型与网络来源不匹配"，
+  表现是 zip 章节**整章空白**（书架、章节数、页数全都正常）。0.14.0 已让它按包 URL
+  懒创建 `WebDavArchivePageResolver` 并转交，两个预取循环也都跳过对方的页
+- 扫描结果会小幅波动 → **已在 0.14.0 修掉**，见 §5.2「207 + 空列表」那一行。
+  如果以后又出现"每次导入数量都不一样"，先怀疑 `_listWithRetry` 被绕过或调小
 
 ---
 
@@ -426,7 +435,20 @@ return Document(
 
 ## 7. 可直接粘贴的提示词
 
-### 7.1 主任务（合并合集）
+### 7.1 已完成：合并合集（0.14.0）
+
+留给记录用 —— 这条需求已经做完，**不要再重做一遍**。
+想验证它现在是否还正常，跑：
+
+```powershell
+$env:INKSCROLL_DAV_URL  = "https://webdav.123pan.cn/webdav"
+$env:INKSCROLL_DAV_USER = "18873682282"
+$env:INKSCROLL_DAV_PASS = "<123云盘 WebDAV 密码>"
+flutter test test/real_scan_manual_test.dart --reporter expanded
+# 期望：关闭 194 本 / 开启 149 本（合集 29），且 194 = 149 − 29 + 74
+```
+
+原始需求（存档）：
 
 ```
 继续开发 inkScroll（Flutter 漫画阅读器）。工作区 D:\DSH Desktop\work\flutter-comic-reader。
@@ -503,6 +525,7 @@ return Document(
 | `tool/probe_encrypted_zip.dart` | 用真实加密 zip 验证 ZipCrypto 解密（三态：无密码/正确/错误） |
 | `tool/make_encrypted_zip.py` | 用 Python 独立实现生成加密 zip（含交叉验证） |
 | `tool/probe_update.dart` | CLI 验证更新解析（走真实接口） |
+| `test/real_scan_manual_test.dart` | **手动**：对真实网盘验证「合并合集」扫描（默认 skip；用 `INKSCROLL_DAV_URL/USER/PASS` 环境变量启用）。CLI 版探针不行 —— 导入器经 `webdav_connection.dart` 拉进 Flutter，`dart run` 会报 `dart:ui` 不可用 |
 
 ---
 
