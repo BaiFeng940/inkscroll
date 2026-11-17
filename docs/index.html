@@ -1,438 +1,560 @@
-<!DOCTYPE html>
-<html lang="zh-CN">
+<!doctype html>
+<html lang="zh-CN" data-type="software" data-radius="round" data-ground="sky" data-buttons="solid" data-motion>
 <head>
-<meta charset="UTF-8">
-<meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>inkScroll — 本地漫画 / 文档阅读器</title>
-<meta name="description" content="inkScroll 是一个 Android 优先的本地漫画与文档阅读器：压缩包按需解压、虚拟长页无缝拼接、120Hz 高刷新率适配，图片永不被拉伸或裁切。">
-<link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>📖</text></svg>">
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>inkScroll：Android 上的本地漫画阅读器</title>
+<meta name="description" content="只解压翻到的那一页：196 MB 的压缩包 4 秒建好书，条漫连成一条长页，网盘上的 zip 翻到哪页拉哪页，120Hz 的屏跑满 120 帧。">
+<meta property="og:type" content="website">
+<meta property="og:title" content="inkScroll：Android 上的本地漫画阅读器">
+<meta property="og:description" content="只解压翻到的那一页：196 MB 的压缩包 4 秒建好书，条漫一条长页，NAS 上的 zip 按页读。">
+<meta property="og:image" content="share.jpg">
+<meta name="twitter:card" content="summary_large_image">
+<link rel="icon" href="favicon.svg" type="image/svg+xml">
+<meta name="theme-color" content="#c3d7e5">
+<meta name="site-kind" content="software">
+<meta name="page-type" content="software">
+
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Instrument+Sans:wdth,wght@75..100,400..700&family=DM+Mono:wght@400;500&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="kit/system.css">
+<link rel="stylesheet" href="kit/ui/cards.css">
+<link rel="stylesheet" href="kit/motion/motion.css">
+<link rel="stylesheet" href="kit/backgrounds/backgrounds.css">
+<link rel="stylesheet" href="kit/layout/layout.css">
+<link rel="stylesheet" href="kit/icons/icon.css">
 <style>
-  :root{
-    --bg:#0b0d12; --bg2:#12151d; --card:#171b25; --line:#242a38;
-    --fg:#e8ecf4; --dim:#98a2b8; --dim2:#6b7488;
-    --accent:#5b7cfa; --accent2:#8b6bfa; --ok:#35d07f; --warn:#ffc53d;
-    --radius:16px;
-  }
-  *{box-sizing:border-box;margin:0;padding:0}
-  html{scroll-behavior:smooth}
-  body{
-    background:var(--bg); color:var(--fg);
-    font-family:-apple-system,BlinkMacSystemFont,"Segoe UI","PingFang SC","Hiragino Sans GB","Microsoft YaHei",sans-serif;
-    line-height:1.65; -webkit-font-smoothing:antialiased;
-  }
-  a{color:var(--accent);text-decoration:none}
-  a:hover{text-decoration:underline}
-  .wrap{max-width:1100px;margin:0 auto;padding:0 22px}
+:root {
+  --p-bg: #c3d7e5; --p-surface: #d0e0eb; --p-ink: #141414; --p-muted: #4a5068;
+  --p-accent: #0f5257; --p-accent-ink: #ffffff; --p-action: #0f5257; --p-action-ink: #ffffff;
+  --p-inv-bg: #141414; --p-inv-surface: #1e1f20; --p-inv-ink: #c3d7e5; --p-inv-muted: #8b959e;
+  --p-inv-accent: #c3d7e5; --p-inv-accent-ink: #141414; --p-inv-action: #c3d7e5; --p-inv-action-ink: #141414;
+  --font-display: "Instrument Sans", system-ui, sans-serif;
+  --font-text: "Instrument Sans", system-ui, sans-serif;
+  --font-mono: "DM Mono", ui-monospace, "SFMono-Regular", Menlo, Consolas, monospace;
+  --display-weight: 500;
+  --display-tracking: -0.028em;
+  --display-tracking-xl: -0.036em;
+  --display-stretch: 96%;
+  --ly-scale: 1.04;
+  /* the app's own interface, drawn inside the visuals only */
+  --ui-bg: #ffffff; --ui-surface: #f2f3f2; --ui-ink: #1b2026; --ui-mut: #4d565f; --ui-line: rgb(20 20 20 / .10);
+  --ui-dark: #0c0d0f; --ui-dark-ink: #eceef0; --ui-dark-mut: #c6cbd0;
+}
 
-  /* ── 顶栏 ── */
-  header{
-    position:sticky;top:0;z-index:50;
-    background:rgba(11,13,18,.82);backdrop-filter:blur(14px);
-    border-bottom:1px solid var(--line);
-  }
-  .nav{display:flex;align-items:center;gap:26px;height:62px}
-  .brand{display:flex;align-items:center;gap:10px;font-weight:700;font-size:17px;letter-spacing:.2px}
-  .brand .dot{
-    width:26px;height:26px;border-radius:8px;flex:0 0 auto;
-    background:linear-gradient(135deg,var(--accent),var(--accent2));
-    display:grid;place-items:center;font-size:14px;
-  }
-  .nav .sp{flex:1}
-  .nav a.lnk{color:var(--dim);font-size:14px}
-  .nav a.lnk:hover{color:var(--fg);text-decoration:none}
-  @media(max-width:720px){.nav a.lnk{display:none}}
+/* ============ 首屏：手机立在受光的台面上（hero-deal: collage）============ */
+.hero__art .ph { position: absolute; left: 308px; top: 24px; width: 320px; border-radius: 34px; background: #141619; padding: 9px;
+  box-shadow: 0 34px 70px -34px rgb(12 18 26 / .5), 0 2px 10px rgb(12 18 26 / .10); }
+.hero__art .ph__scr { position: relative; border-radius: 26px; overflow: hidden; aspect-ratio: 9 / 19.2; }
+.hero__art .ly-piece--note { left: 24px; bottom: 56px; width: 236px; }
+.note-card { background: #fff; border-radius: var(--r-md); padding: 22px 22px 20px; box-shadow: 0 18px 40px -26px rgb(12 18 26 / .45), 0 0 0 1px var(--ui-line); }
+.note-card__row { display: flex; flex-direction: column; gap: 4px; }
+.note-card__row b { font: var(--display-weight) 28px/1 var(--font-display); letter-spacing: var(--display-tracking); color: var(--ui-ink); }
+.note-card__row span { font: 400 12px/1.3 var(--font-text); color: var(--ui-mut); }
+.note-card p { margin: 12px 0 0; font: 400 12px/1.5 var(--font-text); color: var(--ui-ink); }
+.note-card p + p { margin-top: 4px; color: var(--ui-mut); }
+@media (max-width: 639px) { .hero__art .ph { left: 16px; top: 16px; width: calc(100% - 32px); } }
 
-  /* ── Hero ── */
-  .hero{
-    padding:76px 0 56px;position:relative;overflow:hidden;
-    background:
-      radial-gradient(900px 420px at 18% -8%, rgba(91,124,250,.20), transparent 62%),
-      radial-gradient(760px 380px at 88% 4%, rgba(139,107,250,.16), transparent 60%);
-  }
-  .hero h1{font-size:clamp(34px,5.4vw,54px);line-height:1.14;letter-spacing:-.5px;font-weight:800}
-  .grad{background:linear-gradient(100deg,var(--accent),var(--accent2));-webkit-background-clip:text;background-clip:text;color:transparent}
-  .hero p.lead{margin-top:18px;font-size:clamp(15px,2vw,18px);color:var(--dim);max-width:660px}
-  .btns{margin-top:30px;display:flex;gap:12px;flex-wrap:wrap}
-  .btn{
-    display:inline-flex;align-items:center;gap:9px;
-    padding:13px 22px;border-radius:12px;font-weight:600;font-size:15px;
-    border:1px solid transparent;transition:transform .12s ease,opacity .12s ease;
-  }
-  .btn:hover{transform:translateY(-1px);text-decoration:none}
-  .btn.primary{background:linear-gradient(135deg,var(--accent),var(--accent2));color:#fff;box-shadow:0 8px 26px -10px rgba(91,124,250,.85)}
-  .btn.ghost{border-color:var(--line);color:var(--fg);background:var(--card)}
-  .meta{margin-top:20px;font-size:13px;color:var(--dim2);display:flex;gap:16px;flex-wrap:wrap}
+/* 阅读界面（首屏手机里的那一页） */
+.rd { position: absolute; inset: 0; display: grid; grid-template-rows: auto 1fr auto; background: var(--ui-dark); }
+.rd__bar { display: flex; align-items: center; gap: 6px; padding: 14px 12px 8px; font: 500 11px/1 var(--font-text); color: var(--ui-dark-ink); }
+.rd__bar small { margin-left: auto; font: 400 11px/1 var(--font-mono); color: var(--ui-dark-mut); }
+.rd__stage { margin: 0 8px; display: grid; gap: 5px; align-content: start; padding: 6px; border-radius: 3px; background: #f4efe4; }
+.rd__p { border-radius: 2px; position: relative; }
+.rd__p--a span { position: absolute; left: 12px; top: 10px; font: 500 19px/1 var(--font-display); letter-spacing: -0.02em; color: #f4efe4; }
+.rd__p--a { height: 200px; background: radial-gradient(58% 62% at 76% 24%, #ece4d2 0 27%, transparent 28%), linear-gradient(165deg, #2b3c40, #0d1a1d 60%, #0f5257); }
+.rd__p--b { height: 124px; background: linear-gradient(24deg, #b07a45, #5d3c25 68%, #3a2517); }
+.rd__p--c { height: 82px; background: linear-gradient(140deg, #9db3b9, #455c66); }
+.rd__foot { padding: 9px 12px 11px; display: grid; gap: 7px; background: var(--ui-dark); }
+.rd__line { height: 2px; border-radius: 2px; background: rgb(255 255 255 / .26); position: relative; }
+.rd__line i { position: absolute; inset: 0 auto 0 0; width: 21%; border-radius: 2px; background: var(--ui-dark-ink); }
+.rd__meta { display: flex; align-items: center; justify-content: space-between; font: 400 10px/1 var(--font-mono); color: var(--ui-dark-ink); }
+.rd__modes { display: flex; justify-content: space-around; font: 400 10px/1 var(--font-text); color: var(--ui-dark-mut); }
+.rd__modes b { color: var(--ui-dark-ink); font-weight: 500; }
 
-  /* ── 区块 ── */
-  section{padding:64px 0}
-  .eyebrow{
-    font-size:12px;font-weight:700;letter-spacing:1.6px;text-transform:uppercase;
-    color:var(--accent);margin-bottom:12px;
-  }
-  h2{font-size:clamp(24px,3.4vw,32px);font-weight:750;letter-spacing:-.3px}
-  .sub{color:var(--dim);margin-top:12px;max-width:720px}
+/* ============ 第 2 屏：目录在左，这一页在右 ============ */
+.appwin.frame { margin-top: var(--s-7); display: flex; height: 430px;
+  background: var(--ui-bg); border: 1px solid var(--ui-line); border-radius: var(--r-lg); overflow: hidden; }
+.appwin__list { flex: 0 0 36%; min-width: 0; overflow: hidden; background: var(--ui-surface); }
+.appwin__page { position: relative; flex: 1 1 auto; min-width: 0; overflow: hidden; display: grid; justify-items: center; align-content: start; padding-top: 22px; }
+.appwin__page::after { content: ""; position: absolute; inset: auto 0 0 0; height: 64px; background: linear-gradient(transparent, var(--ui-bg)); pointer-events: none; }
+.dir { padding: 20px 20px 0; display: grid; align-content: start; gap: 0; }
+.dir__head { display: grid; gap: 2px; padding-bottom: 14px; }
+.dir__head b { font: 500 13px/1.3 var(--font-mono); color: var(--ui-ink); }
+.dir__head span { font: 400 12px/1.3 var(--font-text); color: var(--ui-mut); }
+.dir__row { display: grid; gap: 1px; padding: 9px 0; border-top: 1px solid var(--ui-line); }
+.dir__row b { font: 400 12px/1.3 var(--font-mono); color: var(--ui-ink); }
+.dir__row span { font: 400 11px/1.3 var(--font-mono); color: var(--ui-mut); }
+.dir__row.is-on { box-shadow: inset 2px 0 0 var(--p-accent); padding-left: 10px; }
+.pg { width: 250px; }
+.pg__bar { display: flex; align-items: center; gap: 6px; padding-bottom: 10px; }
+.pg__bar b { font: 500 12px/1 var(--font-mono); color: var(--ui-ink); }
+.pg__bar small { margin-left: auto; font: 400 12px/1 var(--font-mono); color: var(--ui-mut); }
+.pg__sheet { background: #f4efe4; border-radius: 4px; padding: 7px; display: grid; gap: 6px; box-shadow: 0 20px 44px -30px rgb(12 18 26 / .45); }
+.pg__sheet .rd__p--a { height: 268px; }
+.pg__sheet .rd__p--b { height: 168px; }
+.pg__sheet .rd__p--c { height: 108px; }
+@media (max-width: 1023px) {
+  .appwin.frame { display: block; height: 560px; }
+  .appwin__list { height: 220px; }
+  .appwin__list .dir { grid-template-columns: 1fr 1fr; column-gap: 24px; }
+  .appwin__list .dir__head { grid-column: 1 / -1; }
+  .appwin__page { height: 340px; }
+}
+@media (max-width: 639px) {
+  .appwin.frame { height: 400px; }
+  .appwin__list { display: none; }
+  .appwin__page { height: 400px; padding-top: 16px; }
+  .pg { width: 216px; }
+  .pg__sheet .rd__p--a { height: 168px; }
+  .pg__sheet .rd__p--b { height: 104px; }
+  .pg__sheet .rd__p--c { height: 64px; }
+}
 
-  /* ── 特色卡 ── */
-  .grid{display:grid;gap:16px;margin-top:34px}
-  .g3{grid-template-columns:repeat(auto-fit,minmax(272px,1fr))}
-  .card{
-    background:var(--card);border:1px solid var(--line);border-radius:var(--radius);
-    padding:22px;transition:border-color .15s ease,transform .15s ease;
-  }
-  .card:hover{border-color:#33405c;transform:translateY(-2px)}
-  .card .ico{font-size:22px;margin-bottom:10px}
-  .card h3{font-size:16px;font-weight:680;margin-bottom:7px}
-  .card p{font-size:14px;color:var(--dim)}
+/* ============ 第 3 屏：四个机制 ============ */
+#features .panel, #render .panel { --p-h: 350px; }
+.mock { position: absolute; inset: 16px; border-radius: 12px; background: var(--ui-bg); box-shadow: 0 0 0 1px var(--ui-line), 0 18px 40px -34px rgb(12 18 26 / .5); padding: 18px; display: grid; align-content: start; gap: 0; overflow: hidden; }
+.mock__h { display: flex; align-items: baseline; gap: 8px; padding-bottom: 12px; }
+.mock__h b { font: 500 12px/1.3 var(--font-mono); color: var(--ui-ink); }
+.mock__h span { margin-left: auto; font: 400 11px/1.3 var(--font-text); color: var(--ui-mut); }
+.mock__row { display: grid; gap: 1px; padding: 8px 0; border-top: 1px solid var(--ui-line); }
+.mock__row b { font: 400 12px/1.35 var(--font-mono); color: var(--ui-ink); }
+.mock__row em { font: normal 400 11px/1.35 var(--font-mono); color: var(--ui-mut); }
+.mock__row.is-on { box-shadow: inset 2px 0 0 var(--p-accent); padding-left: 10px; }
+.req { display: grid; gap: 8px; }
+.req__line { padding: 10px 12px; border-radius: 8px; background: var(--ui-surface); font: 400 12px/1.45 var(--font-mono); color: var(--ui-ink); }
+.req__line b { color: var(--p-accent); font-weight: 500; }
+.req__line span { color: var(--ui-mut); }
+.seam { display: grid; gap: 0; }
+.seam__p { border: 1px solid var(--ui-line); }
+.seam__p--a { height: 104px; background: linear-gradient(150deg, #26404a, #0f5257); border-radius: 4px 4px 0 0; }
+.seam__p--b { height: 104px; background: linear-gradient(20deg, #b98a5c, #6d4b2f); border-top: 0; border-radius: 0 0 4px 4px; }
+.seam__mark { display: flex; align-items: center; gap: 8px; padding: 9px 0 6px; font: 400 11px/1 var(--font-mono); color: var(--ui-mut); }
+.seam__mark i { flex: 1; height: 1px; background: repeating-linear-gradient(to right, var(--ui-line) 0 4px, transparent 4px 8px); }
+.hz { display: grid; grid-template-columns: auto 1fr; align-items: end; gap: 6px 16px; }
+.hz strong { font: var(--display-weight) calc(var(--t-h2) * 0.8) / 0.9 var(--font-display); letter-spacing: var(--display-tracking); color: var(--ui-ink); }
+.hz small { font: 400 11px/1.4 var(--font-mono); color: var(--ui-mut); padding-bottom: 3px; }
+.hz__bars { grid-column: 1 / -1; display: flex; align-items: flex-end; gap: 3px; height: 74px; margin-top: 16px; }
+.hz__bars i { flex: 1; background: var(--p-accent); opacity: .78; border-radius: 2px 2px 0 0; }
+@media (min-width: 640px) and (max-width: 1023px) {
+  #features .panel, #render .panel { --p-h: 520px; }
+  .rd__foot { display: none; }
+  .dir__row:nth-of-type(n+5) { display: none; }
+  .helprows { display: none; }
+  #limits .grid { grid-template-columns: 1fr 1fr; }
+  #limits .grid > .span-6 { grid-column: auto; }
+  #limits .plainwin.frame { height: 520px; }
+  .span-6 > .naswin.frame { height: 300px; }
+}
+@media (max-width: 639px) {
+  #features .grid > .card, #render .grid > .card { grid-column: 1 / -1; }
+  #features .panel, #render .panel { --p-h: 130px; }
+  .mock { inset: 12px; padding: 14px; }
+  .mock__row:nth-of-type(n+4) { display: none; }
+  .seam__p--a, .seam__p--b { height: 52px; }
+  .hz__bars { margin-top: 10px; height: 44px; }
+}
 
-  /* ── 截图 ── */
-  .shots{display:flex;gap:18px;overflow-x:auto;padding:34px 0 12px;scroll-snap-type:x mandatory}
-  .shots figure{flex:0 0 auto;scroll-snap-align:start;width:224px}
-  .shots img{
-    width:100%;border-radius:14px;border:1px solid var(--line);
-    background:#000;display:block;
-  }
-  .shots figcaption{margin-top:10px;font-size:12.5px;color:var(--dim2);text-align:center}
+/* ============ 第 4 屏：NAS ============ */
+.naswin.frame { height: 392px; border-radius: var(--r-lg); background: var(--ui-bg); border: 1px solid var(--ui-line); }
+.naswin__bar { display: flex; align-items: baseline; gap: 10px; padding: 18px 22px; }
+.naswin__bar b { font: 500 12px/1.3 var(--font-mono); color: var(--ui-ink); }
+.naswin__bar span { font: 400 11px/1.3 var(--font-mono); color: var(--ui-mut); }
+.naswin__list { padding: 0 22px 86px; display: grid; gap: 0; }
+.naswin__row { display: grid; grid-template-columns: auto 1fr auto; align-items: center; gap: 12px; padding: 14px 0; border-top: 1px solid var(--ui-line); }
+.naswin__row svg { width: 16px; height: 16px; color: #b98a3f; }
+.naswin__row b { font: 400 13px/1.3 var(--font-text); color: var(--ui-ink); font-weight: 400; }
+.naswin__row em { font: normal 400 11px/1.3 var(--font-mono); color: var(--ui-mut); }
+.naswin__foot { position: absolute; inset: auto 0 0 0; display: flex; align-items: center; gap: 12px; padding: 16px 22px; }
+.naswin__foot span { font: 400 11px/1.5 var(--font-text); color: var(--ui-mut); }
+.naswin__foot b { margin-left: auto; display: inline-flex; align-items: center; height: 34px; padding: 0 16px; border-radius: 17px; background: var(--p-accent); color: #fff; font: 500 12px/1 var(--font-text); white-space: nowrap; }
 
-  /* ── 对比表 ── */
-  table{width:100%;border-collapse:collapse;margin-top:28px;font-size:14px}
-  th,td{text-align:left;padding:12px 14px;border-bottom:1px solid var(--line)}
-  th{color:var(--dim2);font-weight:600;font-size:12.5px;text-transform:uppercase;letter-spacing:.7px}
-  td code{background:var(--bg2);padding:2px 7px;border-radius:6px;font-size:12.5px;color:#b9c4dc}
-  .ok{color:var(--ok);font-weight:650}
-  .no{color:#ff6b6b;font-weight:650}
+/* ============ 第 5 屏：数字（moment: counter-rolls）============ */
+.proof .stats { display: block; }
+.proof .stat { border-top: 1px solid var(--line); padding-top: var(--s-4); display: block; text-align: left; }
+.proof .stat:first-child { border-top: 0; padding-top: 0; }
+.proof .stat .t-stat { font-family: var(--font-display); }
 
-  /* ── 安装步骤 ── */
-  ol.steps{margin-top:26px;padding-left:0;list-style:none;counter-reset:s}
-  ol.steps li{
-    counter-increment:s;position:relative;padding:0 0 18px 44px;color:var(--dim);font-size:14.5px;
-  }
-  ol.steps li::before{
-    content:counter(s);position:absolute;left:0;top:0;
-    width:28px;height:28px;border-radius:9px;display:grid;place-items:center;
-    background:var(--bg2);border:1px solid var(--line);color:var(--accent);font-weight:700;font-size:13px;
-  }
-  ol.steps li strong{color:var(--fg)}
-  pre{
-    background:var(--bg2);border:1px solid var(--line);border-radius:10px;
-    padding:14px 16px;overflow-x:auto;font-size:13px;color:#c3cde3;
-    font-family:ui-monospace,SFMono-Regular,Menlo,Consolas,monospace;margin-top:10px;
-  }
+.spec { display: grid; }
+.spec div { display: grid; grid-template-columns: auto 1fr; gap: 16px; padding: 11px 0; border-top: 1px solid var(--line); font: 400 14px/1.4 var(--font-text); }
+.spec div:first-child { border-top: 0; padding-top: 0; }
+.spec dt { color: var(--muted); }
+.spec dd { margin: 0; color: var(--ink); text-align: right; font-family: var(--font-mono); font-size: 13px; }
+@media (max-width: 639px) {
+  .proof .stat { margin-bottom: var(--s-3); padding-top: var(--s-2); }
+  .spec div { padding: 8px 0; }
+}
 
-  footer{border-top:1px solid var(--line);padding:34px 0 46px;color:var(--dim2);font-size:13px}
-  footer .row{display:flex;justify-content:space-between;gap:18px;flex-wrap:wrap}
+/* ============ 第 6 屏：没做的 ============ */
+.plainwin.frame { height: 560px; border-radius: var(--r-lg); background: var(--ui-bg); border: 1px solid var(--ui-line); padding: 22px; overflow: hidden; }
+.plainwin__dlg { border-radius: 12px; background: var(--ui-surface); padding: 18px; }
+.plainwin__dlg b { display: block; font: 500 13px/1.4 var(--font-text); color: var(--ui-ink); }
+.plainwin__dlg p { margin: 6px 0 0; font: 400 12px/1.5 var(--font-text); color: var(--ui-mut); }
+.plainwin__dlg span { display: inline-flex; margin-top: 14px; height: 30px; align-items: center; padding: 0 14px; border-radius: 15px; background: var(--p-accent); color: #fff; font: 500 11px/1 var(--font-text); }
+.chips { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 18px; }
+.chips i { font: normal 400 11px/1 var(--font-mono); color: var(--ui-ink); padding: 7px 9px; border-radius: 6px; background: var(--ui-surface); }
+.chips i.no { color: var(--ui-mut); text-decoration: line-through; }
+.helprows { margin-top: 22px; display: grid; }
+.helprows div { display: flex; align-items: baseline; gap: 10px; padding: 11px 0; border-top: 1px solid var(--ui-line); font: 400 12px/1.4 var(--font-text); color: var(--ui-ink); }
+.helprows em { margin-left: auto; font: normal 400 11px/1 var(--font-mono); color: var(--ui-mut); }
+
+/* ============ 小屏节奏 ============ */
+@media (max-width: 639px) {
+  #nas { --h: 1; --hm: 2; }
+  .rd__foot { display: none; }
+  #render .section-head p { display: none; }
+  .close--word .close__word { display: none; }
+  .closing__cta .t-lead { display: none; }
+  #limits .grid > .span-6.start-7 { order: -1; }
+  #limits .plainwin.frame { display: block; height: 258px; }
+  #limits .helprows { display: none; }
+  #limits .faq__item:nth-of-type(n+4) { display: none; }
+  .mock__row:nth-of-type(n+3) { display: none; }
+  .req__line:nth-of-type(2) { display: none; }
+  .closing__links > .grid > .span-4 { display: none; }
+  .closing__links .grid { grid-template-columns: 1fr 1fr; }
+  .closing__links .footer__col { grid-column: auto; }
+}
+.close--word .close__word { line-height: 1.06; }
+@media (max-width: 1023px) { .helprows { display: none; } }
 </style>
+<script>document.documentElement.classList.add('m-enter');setTimeout(()=>document.documentElement.classList.add('m-enter-done'),700)</script>
+<script src="kit/backgrounds/backgrounds.js"></script>
+<script>document.documentElement.classList.add('mo-js');setTimeout(()=>document.documentElement.classList.add('mo-safe'),2500)</script>
+<link rel="modulepreload" href="kit/moments/moments.js">
+<link rel="modulepreload" href="kit/moments/lib.js">
+<link rel="modulepreload" href="kit/moments/counter-rolls/moment.js">
 </head>
 <body>
+<!-- type: software
+     deal: hero collage（手机立在受光的台面上，一张小卡压在左下角）, nav nav-centre, close close-word,
+           footer footer-dark, rhythm surface-pairs（第 2 屏一段 --g-alt）, buttons solid, mark stack, ground sky
+     moments: counter-rolls 在第 5 屏（实测数字那一行）
+     plan:
+       1 hero          本地漫画阅读器 · 一部手机 + 196 MB / 4 秒的小卡 · 1 屏
+       2 #open          目录在左、这一页在右 · 一个应用窗口（frame）· 1 屏
+       3 #features      四个机制 · 四块面板 · 2 屏（手机 2 屏）
+       4 #nas           NAS 上的 zip 按页读 · 一个 WebDAV 窗口（frame）· 1 屏（手机 2 屏）
+       5 #speed        实测数字（counter-rolls）+ 应用规格 · 1 屏
+       6 #limits       没做的与要注意的 · FAQ + 一个提示窗（frame）· 1 屏
+       7 footer.closing close-word + footer-dark · 1 屏 -->
 
-<header>
-  <div class="wrap nav">
-    <div class="brand"><span class="dot">📖</span> inkScroll</div>
-    <div class="sp"></div>
-    <a class="lnk" href="#features">功能</a>
-    <a class="lnk" href="#shots">截图</a>
-    <a class="lnk" href="#nas">NAS</a>
-    <a class="lnk" href="tutorial.html">教程</a>
-    <a class="lnk" href="help/">帮助文档</a>
-    <a class="lnk" href="#tech">技术</a>
-    <a class="lnk" href="#install">安装</a>
-    <a class="btn ghost" style="padding:8px 16px;font-size:13.5px" href="https://github.com/BaiFeng940/inkscroll">GitHub</a>
+<header class="nav nav--centre">
+  <div class="wrap nav__bar">
+    <a class="skip-link" href="#top">跳到正文</a>
+    <a class="nav__logo" href="#top"><span class="mark" data-mark="stack" aria-hidden="true"></span>inkScroll</a>
+    <nav class="nav__links" aria-label="主导航">
+      <div class="nav__item"><a class="nav__link" href="#open">阅读</a></div>
+      <div class="nav__item"><a class="nav__link" href="#features">机制</a></div>
+      <div class="nav__item"><a class="nav__link" href="#nas">网盘</a></div>
+      <div class="nav__item"><a class="nav__link" href="#limits">问题</a></div>
+    </nav>
+    <div class="nav__actions">
+      <a class="nav__link" href="help/">帮助文档</a>
+      <a class="btn btn--primary" href="https://github.com/BaiFeng940/inkscroll/releases/latest">下载 APK</a>
+    </div>
+    <button class="nav__toggle" type="button" aria-expanded="false" aria-label="菜单">
+      <svg width="18" height="18" viewBox="0 0 18 18" aria-hidden="true"><path d="M2 5h14M2 13h14" stroke="currentColor" stroke-width="1.6" stroke-linecap="round"/></svg>
+    </button>
   </div>
 </header>
 
-<div class="hero">
-  <div class="wrap">
-    <h1>把漫画放进口袋，<br><span class="grad">按需解压，一页不卡。</span></h1>
-    <p class="lead">
-      inkScroll 是一个 Android 优先的本地漫画 / 文档阅读器。
-      压缩包不解压整个文件、图片永远保持原始比例、多页无缝拼成一条长页，
-      还能直接连你的 NAS 在线看漫画 —— 并针对 120Hz 高刷屏做了适配。
-    </p>
-    <div class="btns">
-      <a class="btn primary" href="https://github.com/BaiFeng940/inkscroll/releases/latest">
-        ⬇ 下载 APK <span style="opacity:.75;font-weight:500">v0.7.0</span>
-      </a>
-      <a class="btn ghost" href="help/">帮助文档</a>
-      <a class="btn ghost" href="tutorial.html">图文教程：导入网盘漫画</a>
-    </div>
-    <div class="meta">
-      <span>Android 7.0+ (minSdk 24)</span>
-      <span>·</span>
-      <span>arm64-v8a / armeabi-v7a / x86_64</span>
-      <span>·</span>
-      <span>MIT 开源</span>
-    </div>
-  </div>
-</div>
-
-<section id="features">
-  <div class="wrap">
-    <div class="eyebrow">Features</div>
-    <h2>不只是"能看"</h2>
-    <p class="sub">每一条都对应一个真实踩过的坑，而不是功能清单上的凑数项。</p>
-
-    <div class="grid g3">
-      <div class="card">
-        <h3>网盘压缩包在线读</h3>
-        <p>网盘上的 <code>.zip</code> / <code>.cbz</code> 不用先下载。
-           只读中央目录，翻到哪页才用 HTTP Range 取那页的字节 ——
-           196 MB 的包 4 秒建好书，翻页开销与包大小无关。</p>
+<main id="top">
+  <section class="hero hero--collage" data-enter aria-labelledby="hero-h">
+    <div class="wrap"><div class="hero-text grid hero__grid">
+      <div class="hero__text span-5">
+        <h1 id="hero-h">inkScroll：Android 上的本地漫画阅读器</h1>
+        <p class="hero__lead">只解压翻到的那一页。条漫连成一条没有白缝的长页，网盘上的 zip 翻到哪页拉哪页，120Hz 的屏跑满 120 帧。</p>
+        <div class="btn-row">
+          <a class="btn btn--primary" href="https://github.com/BaiFeng940/inkscroll/releases/latest">下载 APK</a>
+          <a class="btn btn--secondary" href="help/">看帮助文档</a>
+        </div>
+        <p class="hero__proof">Android 7.0 以上 · MIT 许可 · 无账号、无埋点</p>
       </div>
-
-      <div class="card">
-        <h3>合集结构识别</h3>
-        <p>支持「漫画根目录 / 某某合集 / 第一话」这种多一层分类，
-           设置里可开关，默认开启。不再因为多了一层文件夹而导入 0 本。</p>
-      </div>
-
-      <div class="card">
-        <h3>批量管理</h3>
-        <p>长按任意一本书进入选择模式：全选、批量收藏、批量删除，
-           几百本的库也能一次收拾干净。</p>
-      </div>
-
-      <div class="card">
-        <div class="ico">🗜️</div>
-        <h3>压缩包按需读取</h3>
-        <p>自己实现 ZIP 中央目录解析（含 Zip64），只解真正要显示的那一页；打开 1GB 的压缩包和打开 1MB 的一样快，不会一次性解压全部内容。</p>
-      </div>
-      <div class="card">
-        <div class="ico">📐</div>
-        <h3>原始比例，不裁不拉伸</h3>
-        <p>只给宽度约束、高度交给解码器决定。图片宽度撑满屏幕，高度按真实宽高比自动算出——同时做到不变形、不裁切、不留白。</p>
-      </div>
-      <div class="card">
-        <div class="ico">🧵</div>
-        <h3>虚拟长页无缝拼接</h3>
-        <p>上下滑动模式下，下一张的顶部就是上一张的底部，没有间隙也没有高度跳动——占位用嗅探到的真实比例撑开，加载完成不重排。</p>
-      </div>
-      <div class="card">
-        <div class="ico">⚡</div>
-        <h3>120Hz 高刷新率</h3>
-        <p>国产 ROM 默认把应用锁在 60Hz。inkScroll 主动申请显示模式 + 在绘制 Surface 上声明帧率，实测跑满 120fps（vsync 8.33ms）。</p>
-      </div>
-      <div class="card">
-        <div class="ico">📁</div>
-        <h3>真正可用的文件夹导入</h3>
-        <p>Android 11+ 的分区存储让常规方案彻底失效。这里直接用 SAF 原生读取内容并复制进应用目录，选完即用，还能按扩展名过滤。</p>
-      </div>
-      <div class="card">
-        <div class="ico">🔢</div>
-        <h3>按文件名自然排序</h3>
-        <p><code>2.jpg</code> 排在 <code>10.jpg</code> 前面，而不是字典序。导入前还能手动调整顺序，上移、下移、置顶都支持。</p>
-      </div>
-      <div class="card">
-        <div class="ico">🖧</div>
-        <h3>连 NAS 在线看</h3>
-        <p>用 WebDAV 直连飞牛 OS / 群晖 / 威联通 / Alist。书架分<strong>本地库 / 在线库</strong>，选一个目录即可把整个漫画库一次性导入。只列目录不下载，看过的自动缓存。</p>
-      </div>
-      <div class="card">
-        <div class="ico">🎛️</div>
-        <h3>两种阅读模式</h3>
-        <p>左右翻页：拖动和点击两侧翻页同时可用，中间呼出菜单。上下滑动：适合条漫的连续长页。</p>
-      </div>
-      <div class="card">
-        <div class="ico">💾</div>
-        <h3>进度与设置在本地</h3>
-        <p>每本书独立记忆阅读模式与进度，全套设置本地持久化，不需要账号、不联网、不收集任何数据。</p>
-      </div>
-    </div>
-  </div>
-</section>
-
-<section id="shots" style="background:var(--bg2);border-block:1px solid var(--line)">
-  <div class="wrap">
-    <div class="eyebrow">Screenshots</div>
-    <h2>实机截图</h2>
-    <p class="sub">真机（vivo V2417A / Android 16）与模拟器实测，测试图带红/绿边框以便一眼看出有没有被裁切。</p>
-    <div class="shots">
-      <figure><img src="assets/shot-reader-120fps.png" alt="真机 120fps 阅读界面" loading="lazy"><figcaption>真机 120fps（左上角系统角标）</figcaption></figure>
-      <figure><img src="assets/shot-folder-import.png" alt="文件夹导入结果" loading="lazy"><figcaption>文件夹导入：12 张图立即渲染</figcaption></figure>
-      <figure><img src="assets/shot-horizontal.png" alt="左右翻页模式" loading="lazy"><figcaption>左右翻页：未超屏时居中</figcaption></figure>
-      <figure><img src="assets/shot-vertical.png" alt="上下滑动长页" loading="lazy"><figcaption>上下滑动：宽度撑满、顶部对齐</figcaption></figure>
-      <figure><img src="assets/shot-menu.png" alt="阅读菜单" loading="lazy"><figcaption>阅读菜单与模式切换</figcaption></figure>
-    </div>
-  </div>
-</section>
-
-<section id="tech">
-  <div class="wrap">
-    <div class="eyebrow">Engineering</div>
-    <h2>几个值得说的技术点</h2>
-    <p class="sub">这个项目踩过的坑比功能多。下面几条都有实测数据支撑。</p>
-
-    <table>
-      <thead><tr><th>问题</th><th>根因</th><th>解法</th></tr></thead>
-      <tbody>
-        <tr>
-          <td>图片永远加载不出来</td>
-          <td><code>whenComplete</code> 返回的代理 <code>Future</code> 不完成，<code>await</code> 永久挂起</td>
-          <td class="ok">清理逻辑放进 <code>finally</code>，直接返回原始 Future</td>
-        </tr>
-        <tr>
-          <td>上下滑动完全失效</td>
-          <td>注册了 <code>onDoubleTap</code> 后，双击识别器在 pointer down 时就抢占手势竞技场</td>
-          <td class="ok">滚动模式不注册双击，让 Drag 拿到手势</td>
-        </tr>
-        <tr>
-          <td>滑动持续卡顿</td>
-          <td>占位高度为 0，解码后才变真实高度，<code>RenderSliverList</code> 每次重排下方全部内容</td>
-          <td class="ok">占位直接用嗅探到的比例撑开，高度零变化</td>
-        </tr>
-        <tr>
-          <td>文件夹导入静默失败</td>
-          <td>Android 11+ 禁止授权存储根目录；<code>file_picker</code> 的路径转换在 API 30+ 被跳过</td>
-          <td class="ok">自研 SAF 插件，不转路径、直接读内容</td>
-        </tr>
-        <tr>
-          <td>高刷屏只有 60fps</td>
-          <td>应用从未调用 <code>Surface.setFrameRate</code>，系统保守给 60Hz</td>
-          <td class="ok">同时申请显示模式 + 在 Surface 上声明 120Hz</td>
-        </tr>
-        <tr>
-          <td>渲染死循环</td>
-          <td>在 <code>LayoutBuilder</code> 的 builder 里改状态并 <code>notifyListeners</code></td>
-          <td class="ok">build 期间不做任何副作用，重建推迟到帧末</td>
-        </tr>
-      </tbody>
-    </table>
-
-    <div class="grid g3" style="margin-top:34px">
-      <div class="card">
-        <h3>技术栈</h3>
-        <p>Flutter 3.47 / Dart 3.13，状态管理用 Provider + ChangeNotifier；
-           ZIP 解析自己写（只借用 <code>archive</code> 的 Inflate）；
-           文件夹导入用自研 Kotlin SAF 插件。</p>
-      </div>
-      <div class="card">
-        <h3>性能取舍</h3>
-        <p>解码宽度限制到屏幕物理宽（一页约 6MB 而不是 48MB）；
-           页缓存 32 项 / 128MB；进度通知做节流，滚动时不再每帧重建进度条。</p>
-      </div>
-      <div class="card">
-        <h3>设计文档</h3>
-        <p>仓库里的 <code>DESIGN.md</code> 记录了完整架构决策与取舍，
-           <code>README.md</code> 有每一轮修复的根因分析——包括那些失败的尝试。</p>
-      </div>
-    </div>
-  </div>
-</section>
-
-<section id="nas" style="background:var(--bg2);border-block:1px solid var(--line)">
-  <div class="wrap">
-    <div class="eyebrow">NAS / WebDAV</div>
-    <h2>直接连你的 NAS 看漫画</h2>
-    <p class="sub">
-      支持 <strong>飞牛 OS（fnOS）</strong>、群晖、威联通、Alist、Nextcloud ——
-      只要 NAS 开了 WebDAV 就行。不需要装任何服务端插件。
-    </p>
-
-    <div class="grid g3" style="margin-top:30px">
-      <div class="card">
-        <div class="ico">1️⃣</div>
-        <h3>在 NAS 上开启 WebDAV</h3>
-        <p>飞牛 OS：设置 → 文件服务 → WebDAV → 开启。记住端口（默认 <code>5005</code>）与路径（通常 <code>/dav</code>）。</p>
-      </div>
-      <div class="card">
-        <div class="ico">2️⃣</div>
-        <h3>设置里添加 WebDAV 库</h3>
-        <p>App 右上角 <strong>设置 → 在线库 → 添加 WebDAV 库</strong>，填 <code>http://192.168.1.10:5005/dav</code> 与账号密码。连接会被记住。</p>
-      </div>
-      <div class="card">
-        <div class="ico">3️⃣</div>
-        <h3>选一个漫画根目录</h3>
-        <p>进入放漫画的目录，点「添加为库」——它下面<strong>每个含图片的子文件夹都会变成一本书</strong>，全部进「在线库」。不下载整本，翻到哪页拉哪页。</p>
-      </div>
-    </div>
-
-    <table style="margin-top:34px">
-      <thead><tr><th>行为</th><th>说明</th></tr></thead>
-      <tbody>
-        <tr>
-          <td>导入时</td>
-          <td>只发一次 <code>PROPFIND</code> 列目录，<strong>不下载任何图片</strong>，并只用前 64KB 嗅探少量图片的尺寸</td>
-        </tr>
-        <tr>
-          <td>翻页时</td>
-          <td>拉当前页 + 后台预取前后各 2 页；拉下来的页落盘缓存，第二次看就是本地文件</td>
-        </tr>
-        <tr>
-          <td>断网时</td>
-          <td class="ok">已缓存的页照样能看，没缓存的会提示网络错误</td>
-        </tr>
-        <tr>
-          <td>连不上时</td>
-          <td>会区分「地址不对 / 账号错 / 根本不是 WebDAV / 自签证书」，并给出可操作的建议</td>
-        </tr>
-      </tbody>
-    </table>
-
-    <p class="sub" style="margin-top:26px">
-      也可以在电脑上先诊断：<code>dart run tool/webdav_probe.dart &lt;URL&gt; &lt;用户名&gt; &lt;密码&gt;</code>
-    </p>
-
-    <div class="card" style="margin-top:20px;border-color:#4a3b1f;background:#1d1a12">
-      <h3 style="color:#ffc53d">⚠ 关于密码存储</h3>
-      <p>
-        密码存在应用私有目录，并做了一层 XOR + Base64 <strong>混淆</strong>。
-        必须说清楚：<strong>这是混淆，不是加密</strong> —— 密钥编译在 apk 里。
-        更推荐的做法是在 NAS 上单独建一个<strong>只读</strong>的 WebDAV 账号给阅读器用，
-        这样就算泄露也只能读到指定目录。
-      </p>
-    </div>
-  </div>
-      <div class="wrap" style="padding-bottom:48px">
-        <a href="tutorial.html" style="text-decoration:none;color:inherit">
-          <div style="border:1px solid var(--line);border-left:3px solid var(--accent);border-radius:12px;padding:18px 22px;background:var(--card)">
-            <div style="font-weight:700;font-size:16px;margin-bottom:6px">📖 图文教程：把网盘里的漫画导入 inkScroll</div>
-            <div style="color:var(--muted);font-size:13.5px;line-height:1.7">
-              从开通 WebDAV、填写地址账号，到整理目录、等待导入、开始阅读 ——
-              每一步都有截图，含压缩包在线读取与常见问题排查。
+      <div class="hero__art span-6 start-7" role="img" aria-label="inkScroll 的阅读界面：第 37 页，进度 21%，底部是左右滑动、左右点击、上下滑动三种模式">
+        <div class="ly-piece ly-piece--main ph" aria-hidden="true"><div class="ph__scr">
+          <div class="rd">
+            <div class="rd__bar">第一卷<small>37 / 173</small></div>
+            <div class="rd__stage">
+              <div class="rd__p rd__p--a"><span>第一话</span></div>
+              <div class="rd__p rd__p--b"></div>
+              <div class="rd__p rd__p--c"></div>
+            </div>
+            <div class="rd__foot">
+              <div class="rd__line"><i></i></div>
+              <div class="rd__meta"><span>37 / 173</span><span>21%</span></div>
+              <div class="rd__modes"><span>左右滑动</span><b>左右点击</b><span>上下滑动</span></div>
             </div>
           </div>
-        </a>
+        </div></div>
+        <div class="ly-piece ly-piece--note" aria-hidden="true">
+          <div class="note-card">
+            <div class="note-card__row"><b>4 秒</b><span>196&nbsp;MB 建好书</span></div>
+            <p>只读中央目录，不 inflate 整本。</p>
+            <p>翻到哪页，取哪页。</p>
+          </div>
+        </div>
       </div>
-    </section>
+    </div></div>
+  </section>
 
-<section id="install" style="background:var(--bg2);border-block:1px solid var(--line)">
+  <section class="section ground-surface" id="open" aria-labelledby="open-h">
+    <div class="wrap">
+      <div class="section-head">
+        <h2 id="open-h">翻到哪页，取哪页</h2>
+        <p class="t-lead">打开压缩包时只读目录：ZIP 中央目录（含 Zip64）给出每一页的偏移量，翻到这一页才向文件要这一页的字节。1&nbsp;GB 的包和 1&nbsp;MB 的包走同一条路径。</p>
+        <p><a class="link" href="https://github.com/BaiFeng940/inkscroll/blob/main/DESIGN.md">看数据结构</a></p>
+      </div>
+      <div class="appwin frame ui" role="img" aria-label="左边是第一卷.zip 的目录，037.jpg 被选中，右边是第 37 页">
+        <div class="appwin__list">
+          <div class="dir">
+            <div class="dir__head"><b>第一卷.zip</b><span>173 页 · 196&nbsp;MB</span></div>
+            <div class="dir__row"><b>035.jpg</b><span>1.8&nbsp;MB</span></div>
+            <div class="dir__row"><b>036.jpg</b><span>1.7&nbsp;MB</span></div>
+            <div class="dir__row is-on"><b>037.jpg</b><span>1.8&nbsp;MB</span></div>
+            <div class="dir__row"><b>038.jpg</b><span>1.9&nbsp;MB</span></div>
+            <div class="dir__row"><b>039.jpg</b><span>1.6&nbsp;MB</span></div>
+            <div class="dir__row"><b>040.jpg</b><span>1.8&nbsp;MB</span></div>
+            <div class="dir__row"><b>041.jpg</b><span>1.7&nbsp;MB</span></div>
+          </div>
+        </div>
+        <div class="appwin__page">
+          <div class="pg">
+            <div class="pg__bar"><b>037.jpg</b><small>37 / 173 · 21%</small></div>
+            <div class="pg__sheet">
+              <div class="rd__p rd__p--a"><span>第一话</span></div>
+              <div class="rd__p rd__p--b"></div>
+              <div class="rd__p rd__p--c"></div>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <section class="section" id="features" aria-labelledby="features-h">
+    <div class="wrap">
+      <div class="section-head">
+        <h2 id="features-h">一页的字节，只取一次。 <span class="muted">本地包和网盘包走同一条路径。</span></h2>
+      </div>
+      <div class="grid">
+        <article class="card card--row card--open span-6">
+          <h3>只解压这一页</h3>
+          <p>本地的大包也在翻页时才 inflate 那一页，页缓存 32 项 / 128&nbsp;MB，离开的页放回去。</p>
+          <div class="panel">
+            <div class="mock" role="img" aria-label="ZIP 中央目录里每页的偏移量，037.jpg 被读中">
+              <div class="mock__h"><b>第一卷.zip</b><span>中央目录 173 条</span></div>
+              <div class="mock__row"><b>035.jpg</b><em>offset 15872448</em></div>
+              <div class="mock__row"><b>036.jpg</b><em>offset 15874266</em></div>
+              <div class="mock__row is-on"><b>037.jpg</b><em>offset 15876102 · 读</em></div>
+              <div class="mock__row"><b>038.jpg</b><em>offset 15878524</em></div>
+              <div class="mock__row"><b>039.jpg</b><em>offset 15882310</em></div>
+            </div>
+          </div>
+        </article>
+        <article class="card card--row card--open span-6">
+          <h3>网盘走同一套读法</h3>
+          <p>网盘上的 .zip / .cbz 用 HTTP Range 取字节，服务器只回这一段；196&nbsp;MB 的包 4 秒建好书。</p>
+          <div class="panel">
+            <div class="mock" role="img" aria-label="一次 HTTP Range 请求与 206 响应">
+              <div class="req">
+                <div class="req__line"><b>GET</b> /dav/漫画/第一卷.zip<br><b>Range</b> bytes=15876102-15877982</div>
+                <div class="req__line"><b>206</b> Partial Content · 1880 bytes<br><span>翻页开销与包大小无关</span></div>
+              </div>
+            </div>
+          </div>
+        </article>
+      </div>
+    </div>
+  </section>
+
+  <section class="section" id="render" aria-labelledby="render-h">
+    <div class="wrap">
+      <div class="section-head">
+        <h2 id="render-h">拼成一页，再接下一张。 <span class="muted">中间不留白缝，加载完不重排。</span></h2>
+        <p><a class="link" href="https://github.com/BaiFeng940/inkscroll/blob/main/DESIGN.md">看机制记录</a></p>
+      </div>
+      <div class="grid">
+        <article class="card card--row card--open span-6">
+          <h3>长页没有白缝</h3>
+          <p>占位高度先用嗅探到的比例撑开，图加载完不再重排：下一张的顶部就是上一张的底部。</p>
+          <div class="panel">
+            <div class="mock" role="img" aria-label="两页在接缝处相接，间距 0 像素">
+              <div class="seam">
+                <div class="seam__p seam__p--a"></div>
+                <div class="seam__mark"><i></i>接缝 0&nbsp;px<i></i></div>
+                <div class="seam__p seam__p--b"></div>
+              </div>
+            </div>
+          </div>
+        </article>
+        <article class="card card--row card--open span-6">
+          <h3>120Hz 是申请来的</h3>
+          <p>同时申请显示模式并在绘制的 Surface 上声明帧率；系统里给 inkScroll 开高刷之后，vsync 8.33&nbsp;ms。</p>
+          <div class="panel">
+            <div class="mock" role="img" aria-label="帧率读数 120，vsync 8.33 毫秒">
+              <div class="hz">
+                <strong>120</strong>
+                <small>帧 / 秒 · vsync 8.33&nbsp;ms</small>
+                <div class="hz__bars">
+                  <i style="height:72%"></i><i style="height:80%"></i><i style="height:68%"></i><i style="height:86%"></i><i style="height:78%"></i><i style="height:92%"></i><i style="height:84%"></i><i style="height:96%"></i><i style="height:88%"></i><i style="height:94%"></i><i style="height:90%"></i><i style="height:98%"></i>
+                </div>
+              </div>
+            </div>
+          </div>
+        </article>
+      </div>
+    </div>
+  </section>
+
+  <section class="section" id="nas" aria-labelledby="nas-h">
+    <div class="wrap">
+      <div class="section-head">
+        <h2 id="nas-h">NAS 上的漫画，不用先搬下来</h2>
+      </div>
+      <div class="grid grid--top">
+        <div class="span-5 stack-4">
+          <p class="t-lead">WebDAV 直连飞牛 OS、群晖、威联通、Alist、Nextcloud。导入只发一次 PROPFIND 列目录，不下载任何图片；翻页拉当前页，后台预取前后各 2 页。</p>
+          <ul class="rows">
+            <li><span class="rows__name">导入</span><p>一次 PROPFIND，前 64&nbsp;KB 嗅探尺寸</p></li>
+            <li><span class="rows__name">翻页</span><p>当前页 + 前后各 2 页预取</p></li>
+            <li><span class="rows__name">缓存</span><p>落盘的页第二次就是本地文件</p></li>
+          </ul>
+          <p class="t-small muted">密码存在应用私有目录，做的是 XOR + Base64 混淆，不是加密 —— 建议在 NAS 上单独建一个只读账号给它。</p>
+          <p><a class="link" href="tutorial.html">NAS 教程</a></p>
+        </div>
+        <div class="span-6 start-7">
+          <div class="naswin frame ui" role="img" aria-label="inkScroll 的 WebDAV 目录浏览：漫画、单行本、第一卷.zip，底部是添加为库">
+            <div class="naswin__bar"><b>webdav</b><span>https://192.168.1.10:5005/dav</span></div>
+            <div class="naswin__list">
+              <div class="naswin__row"><svg viewBox="0 0 16 16" fill="currentColor"><path d="M1.5 3.5h4l1.4 1.6h7.6v8.4H1.5z"/></svg><b>漫画</b><em>37 个文件夹</em></div>
+              <div class="naswin__row"><svg viewBox="0 0 16 16" fill="currentColor"><path d="M1.5 3.5h4l1.4 1.6h7.6v8.4H1.5z"/></svg><b>单行本</b><em>12 个文件夹</em></div>
+              <div class="naswin__row"><svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.2"><path d="M4 2h5l3 3v9H4z"/></svg><b>第一卷.zip</b><em>196&nbsp;MB</em></div>
+            </div>
+            <div class="naswin__foot"><span>会扫描这里的 37 个子文件夹，每个含图片的都成为一本书</span><b>添加为库</b></div>
+          </div>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <section class="section proof" id="speed" aria-labelledby="speed-h">
+    <div class="wrap">
+      <div class="section-head">
+        <h2 id="speed-h">几组实测数字。</h2>
+      </div>
+      <div class="grid grid--top">
+        <div class="span-6">
+          <p class="t-label muted">实测</p>
+          <div class="stats" data-moment="counter-rolls">
+            <div class="stat"><p class="t-stat">4 秒</p><p class="t-small muted">196&nbsp;MB 的网盘压缩包建好书</p></div>
+            <div class="stat"><p class="t-stat">120</p><p class="t-small muted">高刷屏上跑满的帧率，vsync 8.33&nbsp;ms</p></div>
+            <div class="stat"><p class="t-stat">18.6 MB</p><p class="t-small muted">arm64-v8a 安装包（通用包 53.2&nbsp;MB）</p></div>
+            <div class="stat"><p class="t-stat">6 MB</p><p class="t-small muted">一页解码占用的内存，不是 48&nbsp;MB</p></div>
+          </div>
+        </div>
+        <div class="span-6 start-7">
+          <p class="t-label muted">应用</p>
+          <dl class="spec">
+            <div><dt>版本</dt><dd>0.14.1</dd></div>
+            <div><dt>包名</dt><dd>com.inkscroll.reader</dd></div>
+            <div><dt>minSdk</dt><dd>24（Android 7.0）</dd></div>
+            <div><dt>targetSdk</dt><dd>36</dd></div>
+            <div><dt>形态</dt><dd>Flutter 3.47 / Dart 3.13</dd></div>
+            <div><dt>架构</dt><dd>arm64-v8a / v7a / x86_64</dd></div>
+            <div><dt>大小</dt><dd>18.6&nbsp;MB（arm64）</dd></div>
+            <div><dt>许可</dt><dd>MIT</dd></div>
+          </dl>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <section class="section" id="limits" aria-labelledby="limits-h">
+    <div class="wrap">
+      <div class="section-head">
+        <h2 id="limits-h">没做的，和要注意的</h2>
+      </div>
+      <div class="grid grid--top">
+        <div class="span-6">
+          <div class="faq">
+            <div class="faq__item">
+              <h3>能直接读 RAR 和 7z 吗？</h3>
+              <p>还不能。遇到这两种包会提示先转成 zip，转完的目录结构不用改。</p>
+            </div>
+            <div class="faq__item">
+              <h3>支持 PDF 和 DOCX 吗？</h3>
+              <p>当前版本没有接入。能读的是右边这些图片格式。</p>
+            </div>
+            <div class="faq__item">
+              <h3>120Hz 为什么没生效？</h3>
+              <p>Android 和国产 ROM 默认把应用锁在 60Hz，需要你在系统设置里给 inkScroll 单独打开高刷新率，应用绕不过这一层。</p>
+            </div>
+            <div class="faq__item">
+              <h3>WebDAV 密码怎么存？</h3>
+              <p>应用私有目录里的一层 XOR + Base64 混淆，密钥就在安装包里。建议给阅读器单独建一个只读账号。</p>
+            </div>
+            <div class="faq__item">
+              <h3>会联网、会上传数据吗？</h3>
+              <p>不联网、无账号、无埋点。只有你主动连 NAS 时才发请求，导入的内容留在应用私有目录并写入 <code>.nomedia</code>。</p>
+            </div>
+          </div>
+        </div>
+        <div class="span-6 start-7">
+          <div class="plainwin frame ui" role="img" aria-label="遇到 rar 包时 inkScroll 提示先转成 zip，下面是支持的图片格式和帮助文档的入口">
+            <div class="plainwin__dlg">
+              <b>第一卷.rar</b>
+              <p>这个格式还不支持，请先转成 zip —— 转完的目录结构不用改。</p>
+              <span>知道了</span>
+            </div>
+            <div class="chips">
+              <i>PNG</i><i>JPEG</i><i>GIF</i><i>WebP</i><i>BMP</i><i>ICO</i><i>AVIF</i><i>HEIC</i><i>QOI</i><i class="no">RAR</i><i class="no">7z</i>
+            </div>
+            <div class="helprows">
+              <div>安装：选哪个 APK<em>arm64-v8a</em></div>
+              <div>导入：文件夹 / 压缩包 / 散图<em>SAF</em></div>
+              <div>高刷：在系统里单独开<em>120Hz</em></div>
+              <div>网盘：WebDAV 连不上<em>排查</em></div>
+              <div>缓存：看过的页存在哪<em>128&nbsp;MB</em></div>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+  </section>
+</main>
+
+<footer class="footer closing footer--dark ground-inverse" id="contact" aria-labelledby="close-h">
   <div class="wrap">
-    <div class="eyebrow">Install</div>
-    <h2>安装</h2>
-    <ol class="steps">
-      <li>到 <a href="https://github.com/BaiFeng940/inkscroll/releases/latest">Releases</a> 下载对应架构的 APK。<br>
-          <strong>绝大多数手机选 <code>arm64-v8a</code></strong>；老设备选 <code>armeabi-v7a</code>；模拟器选 <code>x86_64</code>。</li>
-      <li>在手机上允许"安装未知来源应用"，然后点击 APK 安装。</li>
-      <li>打开 inkScroll，点右下角<strong>导入</strong>，选择文件夹 / 压缩包 / 图片。</li>
-      <li>想跑满 120Hz？在系统设置里为 inkScroll <strong>手动开启高刷新率</strong>——
-          这是 Android 与国产 ROM 的限制，应用无法绕过。</li>
-    </ol>
-
-    <p class="sub" style="margin-top:26px">从源码构建：</p>
-<pre>git clone https://github.com/BaiFeng940/inkscroll.git
-cd inkscroll
-flutter pub get
-flutter build apk --release --split-per-abi</pre>
-  </div>
-</section>
-
-<footer>
-  <div class="wrap row">
-    <div>
-      <strong style="color:var(--fg)">inkScroll</strong> · MIT License<br>
-      用 Flutter 写的本地阅读器，不联网、不上传任何数据。
+    <div class="closing__cta close--word">
+      <div class="section-head--split">
+        <div><h2 id="close-h">下载 arm64 安装包</h2><p class="t-lead">18.6&nbsp;MB，Android 7.0 以上，覆盖安装不丢书架。</p></div>
+        <a class="btn btn--primary" href="https://github.com/BaiFeng940/inkscroll/releases/latest">下载 APK</a>
+      </div>
+      <p class="close__word" aria-hidden="true">inkScroll</p>
     </div>
-    <div>
-      <a href="https://github.com/BaiFeng940/inkscroll">源码</a> ·
-      <a href="https://github.com/BaiFeng940/inkscroll/releases">版本发布</a> ·
-      <a href="https://github.com/BaiFeng940/inkscroll/issues">反馈问题</a>
+    <div class="closing__links">
+      <div class="grid">
+        <div class="span-4 stack-4">
+          <a class="nav__logo" href="#top"><span class="mark" data-mark="stack" aria-hidden="true"></span>inkScroll</a>
+          <p class="footer__lede">用 Flutter 写的本地阅读器，MIT 许可，源码在 GitHub。</p>
+        </div>
+        <div class="span-2 footer__col"><h3>内容</h3><ul><li><a href="#open">阅读</a></li><li><a href="#features">机制</a></li><li><a href="#nas">网盘</a></li><li><a href="#speed">速度</a></li></ul></div>
+        <div class="span-2 footer__col"><h3>文档</h3><ul><li><a href="help/">帮助文档</a></li><li><a href="tutorial.html">图文教程</a></li><li><a href="https://github.com/BaiFeng940/inkscroll/blob/main/DESIGN.md">设计文档</a></li></ul></div>
+        <div class="span-2 footer__col"><h3>源码</h3><ul><li><a href="https://github.com/BaiFeng940/inkscroll">GitHub</a></li><li><a href="https://github.com/BaiFeng940/inkscroll/releases">版本发布</a></li><li><a href="https://github.com/BaiFeng940/inkscroll/issues">反馈问题</a></li></ul></div>
+        <div class="span-2 footer__col"><h3>安装</h3><ul><li><a href="#limits">常见问题</a></li><li><a href="https://gitcode.com/BaiFeng940/inkscroll">国内镜像</a></li></ul></div>
+      </div>
+      <div class="footer__legal">
+        <span>&copy; 2026 inkScroll &nbsp; MIT License</span>
+        <div class="socials"></div>
+      </div>
     </div>
   </div>
-  <div class="wrap" style="padding-bottom:40px">
-    <p style="font-size:11.5px;opacity:.55;line-height:1.7;margin:0">
-      图标征集：欢迎投稿 512×512 的 PNG 到
-      <a href="mailto:jk968922@163.com" style="opacity:.8">jk968922@163.com</a>，
-      采用后会在应用关于页署名。
-    </p>
-  </div></footer>
+</footer>
 
+<script type="module" src="kit/system.js"></script>
+<script type="module" src="kit/motion/motion.js"></script>
+<script type="module" src="kit/layout/layout.js"></script>
 </body>
 </html>
