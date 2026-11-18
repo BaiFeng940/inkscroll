@@ -1,0 +1,14 @@
+# 统一行尾：仓库一律 LF（避免 Windows/Python 工具混写 CRLF 的历史坑复发）
+* text=auto eol=lf
+
+# 二进制资源明确标注，防止误转行尾
+*.png binary
+*.jpg binary
+*.jpeg binary
+*.gif binary
+*.webp binary
+*.ico binary
+*.apk binary
+*.zip binary
+*.ttf binary
+*.otf binary
