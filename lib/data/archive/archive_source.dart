@@ -55,7 +55,8 @@ class ArchiveEntryInfo {
   }
 
   @override
-  String toString() => 'ArchiveEntryInfo($entryPath, $uncompressedSize B, m=$compressionMethod)';
+  String toString() =>
+      'ArchiveEntryInfo($entryPath, $uncompressedSize B, m=$compressionMethod)';
 }
 
 abstract interface class ArchiveSource {
@@ -156,7 +157,8 @@ Uint8List subView(Uint8List b, int offset, int length) {
 }
 
 /// 读魔术字节用的小工具（任何导入流程的第一步）
-Future<Uint8List> peekHead(RandomAccessByteSource src, {int bytes = 8192}) async {
+Future<Uint8List> peekHead(RandomAccessByteSource src,
+    {int bytes = 8192}) async {
   final len = await src.length();
   return src.read(0, math.min(bytes, len));
 }

@@ -4,7 +4,6 @@
 /// .zip 实为 rar、.zip 其实是 docx。探测优先，扩展名只用于消歧。
 library;
 
-
 import 'package:path/path.dart' as p;
 
 import '../core/errors.dart';
@@ -22,7 +21,8 @@ import 'txt_importer.dart';
 import 'web_importer.dart';
 
 class RoutedImport {
-  RoutedImport({required this.importer, required this.probe, this.earlyFailure});
+  RoutedImport(
+      {required this.importer, required this.probe, this.earlyFailure});
 
   final Importer? importer;
   final SourceProbe probe;
@@ -280,7 +280,15 @@ class ImportRouter {
   static bool _looksLikeImageExt(String path) {
     final ext = p.extension(path).toLowerCase();
     return const {
-      '.jpg', '.jpeg', '.png', '.webp', '.gif', '.bmp', '.avif', '.heic', '.jfif'
+      '.jpg',
+      '.jpeg',
+      '.png',
+      '.webp',
+      '.gif',
+      '.bmp',
+      '.avif',
+      '.heic',
+      '.jfif'
     }.contains(ext);
   }
 }

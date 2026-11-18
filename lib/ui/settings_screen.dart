@@ -16,6 +16,7 @@ import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 
 import '../data/webdav/webdav_connection.dart';
+import '../data/display_channel.dart';
 import '../core/errors.dart';
 import '../data/models/reader_settings.dart';
 import '../app_version.dart';
@@ -124,7 +125,6 @@ class _SettingsScreenState extends State<SettingsScreen> {
                   obscureText: true,
                   decoration: const InputDecoration(
                     labelText: '添加密码',
-
                     isDense: true,
                   ),
                 ),
@@ -177,6 +177,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
       if (mounted) setState(() => _checkingUpdate = false);
     }
   }
+
   bool _cacheClearing = false;
 
   @override
@@ -263,6 +264,86 @@ class _SettingsScreenState extends State<SettingsScreen> {
   /// 哨兵值，表示用户选了"自动"
   static const String _autoValue = '__auto__';
 
+  String _refreshLabel(HighRefreshMode m) => switch (m) {
+        HighRefreshMode.standard120 => '标准（最高 120Hz）',
+        HighRefreshMode.max => '拉满（用屏幕最高档，如 144Hz）',
+        HighRefreshMode.system => '跟随系统（不主动申请）',
+      };
+
+  /// 屏幕刷新率档位选择。
+  ///
+  /// 旧实现写死"≤120Hz 的最大档"，144Hz 设备（如某些 vivo/一加）
+  /// 被压到 60Hz 且无法更改；现在交给用户选，原生层立即应用。
+  Future<void> _pickRefreshMode(AppState app) async {
+    final picked = await showModalBottomSheet<HighRefreshMode>(
+      context: context,
+      builder: (ctx) => SafeArea(
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            const Padding(
+              padding: EdgeInsets.fromLTRB(20, 18, 20, 8),
+              child: Align(
+                alignment: Alignment.centerLeft,
+                child: Text('屏幕刷新率档位',
+                    style:
+                        TextStyle(fontSize: 17, fontWeight: FontWeight.w600)),
+              ),
+            ),
+            for (final m in HighRefreshMode.values)
+              ListTile(
+                leading: const Icon(Icons.speed_outlined),
+                title: Text(_refreshLabel(m)),
+                trailing: app.settings.highRefreshMode == m
+                    ? const Icon(Icons.check, size: 20)
+                    : null,
+                onTap: () => Navigator.of(ctx).pop(m),
+              ),
+            const Divider(height: 1),
+            ListTile(
+              leading: const Icon(Icons.help_outline),
+              title:
+                  const Text('为什么可能还是 60Hz？', style: TextStyle(fontSize: 14)),
+              subtitle: const Text('国产 ROM 要求把应用加入系统高刷白名单，点这里查看各机型路径',
+                  style: TextStyle(fontSize: 12)),
+              onTap: () {
+                Navigator.of(ctx).pop();
+                _showRefreshInfo();
+              },
+            ),
+            const SizedBox(height: 8),
+          ],
+        ),
+      ),
+    );
+    if (picked == null || !mounted) return;
+    if (picked == app.settings.highRefreshMode) return;
+    await app.updateSettings(app.settings.copyWith(highRefreshMode: picked));
+    await DisplayChannel.setRefreshMode(picked.name);
+  }
+
+  /// 高刷白名单说明（各机型路径）。原来是刷新率 Tile 的 onTap，
+  /// 现在作为档位选择面板里的"为什么可能还是 60Hz"入口。
+  void _showRefreshInfo() {
+    _showInfo(
+      title: '屏幕刷新率',
+      body: 'inkScroll 会主动向系统申请高刷新率，但 Android 默认只给'
+          '系统允许列表里的应用开高刷。\n\n'
+          '需要你手动把本应用加进去：\n'
+          '打开 系统设置 → 显示与亮度 → 屏幕刷新率，'
+          '找到「使用高刷新率的应用」（有的机型叫「高刷新率应用列表」'
+          '或「选择应用」），把 inkScroll 打开。\n\n'
+          '常见机型位置：\n'
+          '· vivo / iQOO：设置 → 显示与亮度 → 屏幕刷新率 → '
+          '使用高刷新率的应用\n'
+          '· OPPO / 一加：设置 → 显示与亮度 → 屏幕刷新率 → 选择应用\n'
+          '· 小米 / Redmi：设置 → 显示 → 高刷新率 → 应用列表\n'
+          '· 华为 / 荣耀：设置 → 显示与亮度 → 屏幕刷新率\n\n'
+          '找不到这个选项也不影响使用：不动它照样能正常看书，'
+          '只是滑动可能停在 60Hz。系统不允许应用自己绕过这个限制。',
+    );
+  }
+
   @override
   Widget build(BuildContext context) {
     final app = context.watch<AppState>();
@@ -294,6 +375,15 @@ class _SettingsScreenState extends State<SettingsScreen> {
             subtitle: Text(_modeLabel(app.settings.defaultMode)),
             trailing: const Icon(Icons.chevron_right),
             onTap: () => _pickDefaultMode(app),
+          ),
+
+          // ── 屏幕刷新率档位 ──
+          ListTile(
+            leading: const Icon(Icons.speed),
+            title: const Text('屏幕刷新率档位'),
+            subtitle: Text(_refreshLabel(app.settings.highRefreshMode)),
+            trailing: const Icon(Icons.chevron_right),
+            onTap: () => _pickRefreshMode(app),
           ),
 
           const Divider(height: 24),
@@ -392,8 +482,8 @@ class _SettingsScreenState extends State<SettingsScreen> {
             child: Text(
               '只清理「看过的页、解压产物、封面」这些可以随时重建的数据。'
               '书架、阅读进度、网盘连接与密码都不会被删除。',
-              style: TextStyle(
-                  fontSize: 11, height: 1.5, color: theme.hintColor),
+              style:
+                  TextStyle(fontSize: 11, height: 1.5, color: theme.hintColor),
             ),
           ),
 
@@ -419,7 +509,6 @@ class _SettingsScreenState extends State<SettingsScreen> {
                   '目录里的 zip / cbz 压缩包也算一本。',
             ),
           ),
-
 
           // 「合集」结构识别（默认开启）
           SwitchListTile(
@@ -483,20 +572,20 @@ class _SettingsScreenState extends State<SettingsScreen> {
                 ),
                 const SizedBox(height: 8),
                 if (app.lastImportSummary != null) ...[
-                const SizedBox(height: 10),
-                Container(
-                  width: double.infinity,
-                  padding: const EdgeInsets.all(10),
-                  decoration: BoxDecoration(
-                    color: theme.colorScheme.surfaceContainerHighest,
-                    borderRadius: BorderRadius.circular(8),
+                  const SizedBox(height: 10),
+                  Container(
+                    width: double.infinity,
+                    padding: const EdgeInsets.all(10),
+                    decoration: BoxDecoration(
+                      color: theme.colorScheme.surfaceContainerHighest,
+                      borderRadius: BorderRadius.circular(8),
+                    ),
+                    child: Text(
+                      '上次导入：${app.lastImportSummary}',
+                      style: const TextStyle(fontSize: 11, height: 1.5),
+                    ),
                   ),
-                  child: Text(
-                    '上次导入：${app.lastImportSummary}',
-                    style: const TextStyle(fontSize: 11, height: 1.5),
-                  ),
-                ),
-              ],
+                ],
               ],
             ),
           ),

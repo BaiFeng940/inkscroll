@@ -55,6 +55,7 @@ class ByteStore {
       // 写不进去也不影响功能
     }
   }
+
   String bookDir(String bookId) => p.join(root.path, bookId);
 
   /// 供 DocumentCodec 直接使用
@@ -98,7 +99,8 @@ class ByteStore {
   ///
   /// 和 `extracted` 一样属于**可随时删除**的缓存：
   /// 删掉只是回到"每次翻页都走网络"，不影响书籍本身。
-  String webdavCacheDirFor(String bookId) => p.join(bookDir(bookId), 'netcache');
+  String webdavCacheDirFor(String bookId) =>
+      p.join(bookDir(bookId), 'netcache');
 
   /// 某个压缩包条目解压后的落盘路径。
   ///
@@ -189,7 +191,8 @@ class ByteStore {
         copied += chunk.length;
         // 每 1% 或 2MB 报一次，避免进度回调本身成为瓶颈
         if (total > 0 &&
-            (copied - lastReported > total / 100 || copied - lastReported > 2 << 20)) {
+            (copied - lastReported > total / 100 ||
+                copied - lastReported > 2 << 20)) {
           lastReported = copied;
           onProgress?.call(
             (copied / total).clamp(0, 1),
@@ -217,7 +220,8 @@ class ByteStore {
     await dstRoot.create(recursive: true);
 
     final files = <File>[];
-    await for (final entity in srcRoot.list(recursive: true, followLinks: false)) {
+    await for (final entity
+        in srcRoot.list(recursive: true, followLinks: false)) {
       isCancelled?.call();
       if (entity is File) files.add(entity);
     }
@@ -254,7 +258,8 @@ class ByteStore {
       final src = File(paths[i]);
       if (!await src.exists()) continue;
       // 保留原名，并加序号前缀保证顺序稳定
-      final name = '${(i + 1).toString().padLeft(5, '0')}_${p.basename(paths[i])}';
+      final name =
+          '${(i + 1).toString().padLeft(5, '0')}_${p.basename(paths[i])}';
       final dst = File(p.join(dirFor(bookId).path, name));
       await dst.parent.create(recursive: true);
       await src.copy(dst.path);

@@ -90,7 +90,6 @@ class _PrepareScreenState extends State<PrepareScreen> {
                   ),
                 ),
                 const SizedBox(height: 28),
-
                 if (!_finished) ...[
                   SizedBox(
                     width: 220,
@@ -116,7 +115,8 @@ class _PrepareScreenState extends State<PrepareScreen> {
                     Text(
                       '${p.done}/${p.total}'
                       '${p.bytesWritten > 0 ? ' · 已写入 ${ByteStore.humanSize(p.bytesWritten)}' : ''}',
-                      style: const TextStyle(color: Colors.white38, fontSize: 12),
+                      style:
+                          const TextStyle(color: Colors.white38, fontSize: 12),
                     ),
                     if (p.currentEntry != null) ...[
                       const SizedBox(height: 6),
@@ -124,7 +124,8 @@ class _PrepareScreenState extends State<PrepareScreen> {
                         p.currentEntry!,
                         maxLines: 1,
                         overflow: TextOverflow.ellipsis,
-                        style: const TextStyle(color: Colors.white24, fontSize: 11),
+                        style: const TextStyle(
+                            color: Colors.white24, fontSize: 11),
                       ),
                     ],
                   ],
@@ -141,8 +142,12 @@ class _PrepareScreenState extends State<PrepareScreen> {
                   ),
                 ] else ...[
                   Icon(
-                    _notice == null ? Icons.check_circle_outline : Icons.info_outline,
-                    color: _notice == null ? Colors.greenAccent : Colors.orangeAccent,
+                    _notice == null
+                        ? Icons.check_circle_outline
+                        : Icons.info_outline,
+                    color: _notice == null
+                        ? Colors.greenAccent
+                        : Colors.orangeAccent,
                     size: 40,
                   ),
                   const SizedBox(height: 16),
@@ -150,7 +155,9 @@ class _PrepareScreenState extends State<PrepareScreen> {
                     _notice ?? '解压完成',
                     textAlign: TextAlign.center,
                     style: TextStyle(
-                      color: _notice == null ? Colors.white70 : Colors.orangeAccent,
+                      color: _notice == null
+                          ? Colors.white70
+                          : Colors.orangeAccent,
                       fontSize: 13,
                       height: 1.6,
                     ),

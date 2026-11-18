@@ -68,12 +68,44 @@ class RefreshRateController(private val activity: Activity) {
 
     private var windowAppliedHz = 0f
 
+    /// 刷新率档位策略（由 Flutter 侧设置，见 ReaderSettings.highRefreshMode）：
+    ///   standard120 — 优先 120Hz（默认，老行为）
+    ///   max         — 用屏幕最高档（如 144Hz 设备不再被压到 60Hz）
+    ///   system      — 跟随系统（清除主动声明，交给 ROM 决定）
+    @Volatile
+    private var targetMode: String = "standard120"
+
+    /** 切换档位（Dart 侧启动时 / 用户改设置时调用） */
+    fun setTarget(mode: String) {
+        if (mode == targetMode) return
+        targetMode = mode
+        windowAppliedHz = 0f // 强制重新应用
+        applyWindowMode()
+        applySurfaceFrameRate()
+    }
+
     // ------------------------------------------------------------------
     // 对外入口
     // ------------------------------------------------------------------
 
     /** 在 onCreate / onResume 里调用：先把窗口的显示模式切过去 */
     fun applyWindowMode() {
+        // 跟随系统：清除主动声明，交给 ROM 决定
+        if (targetMode == "system") {
+            try {
+                val attrs = activity.window.attributes
+                if (attrs.preferredDisplayModeId != 0 || attrs.preferredRefreshRate != 0f) {
+                    attrs.preferredDisplayModeId = 0
+                    attrs.preferredRefreshRate = 0f
+                    activity.window.attributes = attrs
+                    windowAppliedHz = 0f
+                    Log.i(TAG, "刷新率 → 跟随系统（清除 preferredDisplayModeId）")
+                }
+            } catch (e: Exception) {
+                Log.w(TAG, "清除 preferredDisplayModeId 失败：${e.message}")
+            }
+            return
+        }
         val display = resolveDisplay() ?: run {
             Log.w(TAG, "拿不到 Display，跳过刷新率设置")
             return
@@ -113,6 +145,7 @@ class RefreshRateController(private val activity: Activity) {
      */
     fun applySurfaceFrameRate() {
         if (Build.VERSION.SDK_INT < Build.VERSION_CODES.R) return
+        if (targetMode == "system") return // 跟随系统：不做 setFrameRate 声明
 
         val display = resolveDisplay() ?: return
         val target = pickTargetHz(display)
@@ -153,7 +186,9 @@ class RefreshRateController(private val activity: Activity) {
     /**
      * 挑目标刷新率。
      *
-     * 1. 有正好 120 的档 → 用 120（用户要求）
+     * max 档位：直接用屏幕最高档（144Hz 设备不再被压到 60Hz）。
+     * standard120 档位（默认）：
+     * 1. 有正好 120 的档 → 用 120
      * 2. 否则用"不超过 120 的最大档"（例如只有 90 的设备用 90）
      * 3. 都没有（例如 144/60 两档）→ 退到最小档，避免盲目拉满
      */
@@ -164,6 +199,7 @@ class RefreshRateController(private val activity: Activity) {
             .distinct()
 
         if (rates.isEmpty()) return 60f
+        if (targetMode == "max") return rates.maxOrNull() ?: 60f
 
         rates.firstOrNull { abs(it - TARGET_HZ) < HZ_EPSILON }?.let { return it }
         rates.filter { it <= TARGET_HZ + HZ_EPSILON }.maxOrNull()?.let { return it }

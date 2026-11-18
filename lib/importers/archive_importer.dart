@@ -95,8 +95,10 @@ class ArchiveImporter implements Importer {
 
       if (images.isEmpty && texts.isEmpty) {
         // 嵌套压缩包 / 不支持的内容 → 给出明确原因
-        final nested =
-            files.where((e) => isArchivePath(e.entryPath)).map((e) => e.entryPath).toList();
+        final nested = files
+            .where((e) => isArchivePath(e.entryPath))
+            .map((e) => e.entryPath)
+            .toList();
         if (nested.isNotEmpty) {
           return ImportFailure(GenericError(
             '压缩包里套着压缩包（${nested.first}）。'
@@ -108,7 +110,8 @@ class ArchiveImporter implements Importer {
 
       // ── 第 4 步：图片为主 → 漫画；文本为主 → 小说 ──
       if (images.length >= 3 && images.length >= texts.length) {
-        return ImportedDocument(await _buildComic(ctx, source, images, dstPath));
+        return ImportedDocument(
+            await _buildComic(ctx, source, images, dstPath));
       }
       if (texts.isNotEmpty) {
         return ImportedDocument(await _buildNovel(ctx, source, texts, dstPath));
@@ -289,8 +292,7 @@ class ArchiveImporter implements Importer {
 
     final webtoon = looksLikeWebtoon(aspects);
     final isSampled = toSniff.length < total;
-    final sniffFailCount =
-        sniffedValues.where((v) => v == null).length;
+    final sniffFailCount = sniffedValues.where((v) => v == null).length;
 
     return Document(
       id: 'doc_${ctx.pick.sourceId}',

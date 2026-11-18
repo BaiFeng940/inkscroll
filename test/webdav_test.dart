@@ -27,8 +27,7 @@ import 'package:inkscroll/data/models/book_meta.dart';
 import 'package:inkscroll/data/webdav/webdav_connection.dart';
 
 /// 造一个多状态响应
-String multistatus(String body) =>
-    '<?xml version="1.0" encoding="utf-8"?>\n'
+String multistatus(String body) => '<?xml version="1.0" encoding="utf-8"?>\n'
     '<D:multistatus xmlns:D="DAV:">$body</D:multistatus>';
 
 String responseEntry({
@@ -142,7 +141,8 @@ void main() {
     test('已经是绝对 URL 时原样返回', () {
       final c = WebDavClient(baseUrl: 'http://nas:5005/dav');
       expect(
-        c.resolveHref('https://other/dav/x.jpg', Uri.parse('http://nas:5005/dav/')),
+        c.resolveHref(
+            'https://other/dav/x.jpg', Uri.parse('http://nas:5005/dav/')),
         'https://other/dav/x.jpg',
       );
     });
@@ -181,9 +181,18 @@ void main() {
     test('解析出目录与文件，并过滤掉自己', () async {
       final xml = multistatus(
         responseEntry(href: '/dav/', isDir: true, displayName: 'dav') +
-            responseEntry(href: '/dav/%E6%BC%AB%E7%94%BB/', isDir: true, displayName: '漫画') +
-            responseEntry(href: '/dav/%E6%BC%AB%E7%94%BB/001.jpg', displayName: '001.jpg', size: 60047) +
-            responseEntry(href: '/dav/%E6%BC%AB%E7%94%BB/002.jpg', displayName: '002.jpg', size: 58590),
+            responseEntry(
+                href: '/dav/%E6%BC%AB%E7%94%BB/',
+                isDir: true,
+                displayName: '漫画') +
+            responseEntry(
+                href: '/dav/%E6%BC%AB%E7%94%BB/001.jpg',
+                displayName: '001.jpg',
+                size: 60047) +
+            responseEntry(
+                href: '/dav/%E6%BC%AB%E7%94%BB/002.jpg',
+                displayName: '002.jpg',
+                size: 58590),
       );
 
       final client = WebDavClient(
@@ -564,8 +573,8 @@ void main() {
       // 所以用 clearDefaultMode 这个显式开关。
       final auto = s.copyWith(clearDefaultMode: true);
       expect(auto.defaultMode, isNull);
-      expect(s.copyWith(margin: 20).defaultMode,
-          ReadingMode.verticalContinuous);
+      expect(
+          s.copyWith(margin: 20).defaultMode, ReadingMode.verticalContinuous);
     });
   });
 

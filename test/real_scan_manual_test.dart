@@ -32,9 +32,7 @@ void main() {
   final url = _env('INKSCROLL_DAV_URL');
   final user = _env('INKSCROLL_DAV_USER');
   final pass = _env('INKSCROLL_DAV_PASS');
-  final missing = url == null
-      ? '未设置 INKSCROLL_DAV_URL（这是手动验证，需要真实网盘）'
-      : null;
+  final missing = url == null ? '未设置 INKSCROLL_DAV_URL（这是手动验证，需要真实网盘）' : null;
 
   late WebDavClient client;
   late WebDavConnection conn;

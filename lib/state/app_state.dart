@@ -14,6 +14,7 @@ import 'package:flutter/foundation.dart';
 import 'package:path/path.dart' as p;
 
 import '../core/errors.dart';
+import '../core/natural_sort.dart';
 import '../data/archive/tar_archive_source.dart';
 import '../data/archive_extractor.dart';
 import '../data/archive/zip_archive_source.dart';
@@ -24,6 +25,7 @@ import '../data/importer.dart';
 import '../data/models/book_meta.dart';
 import '../data/models/reader_settings.dart';
 import '../data/pdf/pdf_native.dart';
+import '../data/display_channel.dart';
 import '../data/import_lock.dart';
 import '../data/prefs_store.dart';
 import '../data/update_service.dart';
@@ -83,6 +85,10 @@ class AppState extends ChangeNotifier {
     zipPasswords = _prefs.loadZipPasswords();
     ready = true;
     notifyListeners();
+
+    // 高刷档位要在原生层启动时就位（onCreate 已按默认值申请过，
+    // 这里按用户选择覆盖。旧实现写死 ≤120Hz，144Hz 设备被压到 60Hz）。
+    unawaited(DisplayChannel.setRefreshMode(settings.highRefreshMode.name));
 
     // 给历史数据补封面（老版本导入的书没有 coverPath）。
     // 后台跑，不阻塞启动。
@@ -226,10 +232,10 @@ class AppState extends ChangeNotifier {
       // 整批期间不生成封面，结束后统一在后台补（见 _scheduleCover 注释）
       _deferCovers = true;
 
-    // 允许后台加载：导入期间持有 CPU 唤醒锁 + Wi-Fi 高性能锁。
-    // 否则用户切到后台或息屏后，系统会降频 CPU 并把 Wi-Fi 打进省电模式，
-    // 几十本书的导入会明显变慢甚至被中断。
-    final locked = await acquireImportLock();
+      // 允许后台加载：导入期间持有 CPU 唤醒锁 + Wi-Fi 高性能锁。
+      // 否则用户切到后台或息屏后，系统会降频 CPU 并把 Wi-Fi 打进省电模式，
+      // 几十本书的导入会明显变慢甚至被中断。
+      final locked = await acquireImportLock();
       try {
         // ── 并发导入 ──
         //
@@ -358,8 +364,11 @@ class AppState extends ChangeNotifier {
           if (meta != null) imported.add(meta);
         }
       } finally {
-    if (locked) await releaseImportLock();
+        if (locked) await releaseImportLock();
         _deferCovers = false;
+        // ★ 防重入标志必须复位。旧实现漏了这一行 —— 第一轮批量导入
+        //   结束后，本次会话内再次「添加为库」永远报"已有一批导入正在进行"
+        //   （审计 P1-1，真机可感）。
 
         // ★ 一次写盘 + 一次刷新。逐本 upsertBook + notifyListeners
         //   在大库上是 O(n²) 的 JSON 编解码，导入后半段会明显卡。
@@ -644,7 +653,8 @@ class AppState extends ChangeNotifier {
     }
   }
 
-  Future<BookMeta> _runImport(SourcePick pick, {required String? password}) async {
+  Future<BookMeta> _runImport(SourcePick pick,
+      {required String? password}) async {
     // ★ WebDAV 不走 router：router 探的是**本地文件**（读头部判断格式），
     //   而 NAS 上的内容还没下载，无从探测。直接交给专用导入器。
     final Importer importer;
@@ -863,7 +873,22 @@ class AppState extends ChangeNotifier {
       }
     } finally {
       _coverWorkerRunning = false;
+      // 队列清空后强制广播一次，保证最后几张封面一定上屏
+      notifyListeners();
     }
+  }
+
+  /// 封面是后台逐本生成的，每完成一张都全 App 广播会让书架在
+  /// 批量补封面时反复整树重建（审计 P2-3）。节流到 150ms 一吹，
+  /// 队列清空时再强制吹一次（见 _drainCovers 的 finally）。
+  DateTime? _lastCoverNotifyAt;
+
+  void _notifyCoverChanged() {
+    final now = DateTime.now();
+    final last = _lastCoverNotifyAt;
+    if (last != null && now.difference(last).inMilliseconds < 150) return;
+    _lastCoverNotifyAt = now;
+    notifyListeners();
   }
 
   /// 确保这本书有封面（取自第一张图片），生成后落盘并刷新书架。
@@ -879,6 +904,7 @@ class AppState extends ChangeNotifier {
     if (_deferCovers) return;
     unawaited(_drainCovers());
   }
+
   ///
   /// 任何失败都**静默忽略** —— 封面只是锦上添花，
   /// 不能因为某本书第一页读不出来就影响书架显示或导入结果。
@@ -897,7 +923,7 @@ class AppState extends ChangeNotifier {
         if (path != null) {
           await _prefs.setCover(book.id, path);
           books = _prefs.loadBooks();
-          notifyListeners();
+          _notifyCoverChanged();
         }
       } finally {
         await built.resolver.dispose();
@@ -1054,9 +1080,12 @@ class AppState extends ChangeNotifier {
       if (pdfPath == null) {
         throw const GenericError('这本 PDF 的页面信息已损坏，请删除后重新导入。');
       }
+      final resolver = PdfPageResolver(pdfPath: pdfPath);
+      // 注入阅读顺序：翻页/滚动时按它预取前后邻页（渲染比图片解码贵）
+      resolver.attachPageOrder(doc.pagesInOrder);
       return (
         document: doc,
-        resolver: PdfPageResolver(pdfPath: pdfPath),
+        resolver: resolver,
       );
     }
 
@@ -1067,7 +1096,11 @@ class AppState extends ChangeNotifier {
         final doc = cached ?? await _rebuildFileDocument(book);
         return (document: doc, resolver: FilePageByteResolver());
 
-      case WebDavSource(:final connectionId, :final folderUrl, :final folderName):
+      case WebDavSource(
+          :final connectionId,
+          :final folderUrl,
+          :final folderName
+        ):
         final conn = webdavConnections.byId(connectionId);
         if (conn == null) {
           throw const GenericError(
@@ -1282,9 +1315,10 @@ class AppState extends ChangeNotifier {
     ArchiveSource source,
     String archivePath,
   ) async {
-    final images =
-        source.entries.where((e) => !e.isDirectory && _isImagePath(e.entryPath)).toList()
-          ..sort((a, b) => _natural(a.entryPath, b.entryPath));
+    final images = source.entries
+        .where((e) => !e.isDirectory && _isImagePath(e.entryPath))
+        .toList()
+      ..sort((a, b) => _natural(a.entryPath, b.entryPath));
 
     if (images.isEmpty) throw const ImportEmptyError();
 
@@ -1297,7 +1331,8 @@ class AppState extends ChangeNotifier {
     final chapters = <Chapter>[];
     int ci = 0;
     for (final dirKey in groups.keys.toList()..sort(_natural)) {
-      final list = groups[dirKey]!..sort((a, b) => _natural(a.entryPath, b.entryPath));
+      final list = groups[dirKey]!
+        ..sort((a, b) => _natural(a.entryPath, b.entryPath));
       final pageIds = <String>[];
       for (final e in list) {
         final id = 'p:${e.entryPath}';
@@ -1339,49 +1374,30 @@ class AppState extends ChangeNotifier {
   static bool _isImagePath(String path) {
     final ext = p.extension(path).toLowerCase();
     return const {
-      '.jpg', '.jpeg', '.png', '.webp', '.gif', '.bmp', '.avif', '.heic', '.jfif'
+      '.jpg',
+      '.jpeg',
+      '.png',
+      '.webp',
+      '.gif',
+      '.bmp',
+      '.avif',
+      '.heic',
+      '.jfif'
     }.contains(ext);
   }
 
   static int _natural(String a, String b) {
-    // 逐段自然排序：'第1话/10.jpg' 与 '第10话/1.jpg' 不会错位
-    final pa = a.replaceAll('\\', '/').split('/');
-    final pb = b.replaceAll('\\', '/').split('/');
-    for (int i = 0; i < pa.length && i < pb.length; i++) {
-      final c = _cmpNatural(pa[i], pb[i]);
-      if (c != 0) return c;
-    }
-    return pa.length - pb.length;
+    // 统一走 core 的自然排序实现（含前导零 tie-break，'1' < '01'）。
+    // 旧版在这里重复实现了一套且没有 tie-break，与 core 的行为已经漂移
+    //（审计 P4-7）：重建文档与导入器可能给出不同页序。
+    // Windows 本地路径用 '\'，zip 条目用 '/' —— 先归一再逐段比较。
+    return NaturalComparator.comparePath(
+      a.replaceAll('\\', '/'),
+      b.replaceAll('\\', '/'),
+    );
   }
 
-  static int _cmpNatural(String a, String b) {
-    int i = 0, j = 0;
-    while (i < a.length && j < b.length) {
-      final ca = a.codeUnitAt(i), cb = b.codeUnitAt(j);
-      final da = ca >= 0x30 && ca <= 0x39;
-      final db = cb >= 0x30 && cb <= 0x39;
-      if (da && db) {
-        int si = i, sj = j;
-        while (i < a.length && a.codeUnitAt(i) >= 0x30 && a.codeUnitAt(i) <= 0x39) {
-          i++;
-        }
-        while (j < b.length && b.codeUnitAt(j) >= 0x30 && b.codeUnitAt(j) <= 0x39) {
-          j++;
-        }
-        final na = a.substring(si, i).replaceFirst(RegExp(r'^0+(?=\d)'), '');
-        final nb = b.substring(sj, j).replaceFirst(RegExp(r'^0+(?=\d)'), '');
-        if (na.length != nb.length) return na.length - nb.length;
-        final c = na.compareTo(nb);
-        if (c != 0) return c;
-      } else {
-        final c = ca.compareTo(cb);
-        if (c != 0) return c;
-        i++;
-        j++;
-      }
-    }
-    return (a.length - i) - (b.length - j);
-  }
+  DateTime? _lastProgressNotifyAt;
 
   void _setProgress(double? ratio, String label) {
     if (ratio == null) {
@@ -1389,7 +1405,17 @@ class AppState extends ChangeNotifier {
     } else {
       importProgress = ImportProgressState(ratio, label);
     }
-    notifyListeners();
+    // 导入进度 tick 很密（每本书至少一次 + 扫描回调），每次都全 App
+    // 广播是大库导入后期卡顿的来源之一（审计 P2-3）。节流到 120ms；
+    // 结束（ratio == null）必须立即广播，终态不能被节流吃掉。
+    final now = DateTime.now();
+    final last = _lastProgressNotifyAt;
+    if (ratio == null ||
+        last == null ||
+        now.difference(last).inMilliseconds >= 120) {
+      _lastProgressNotifyAt = ratio == null ? null : now;
+      notifyListeners();
+    }
   }
 }
 
@@ -1404,6 +1430,7 @@ class PasswordPromptNeeded implements Exception {
   const PasswordPromptNeeded({required this.attempt});
   final int attempt;
 }
+
 /// 「添加 WebDAV 库」的批量导入结果
 class WebDavLibraryResult {
   const WebDavLibraryResult({

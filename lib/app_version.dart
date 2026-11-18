@@ -6,7 +6,7 @@
 library;
 
 /// 当前应用版本（不含 build number）
-const String kAppVersion = '0.14.1';
+const String kAppVersion = '0.15.0';
 
 // ---------------------------------------------------------------------------
 // 更新源

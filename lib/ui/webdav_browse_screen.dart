@@ -183,9 +183,8 @@ class _WebDavBrowseScreenState extends State<WebDavBrowseScreen> {
   }
 
   /// 当前目录下的图片
-  List<WebDavEntry> get _images => _entries
-      .where((e) => !e.isDirectory && _isImageName(e.name))
-      .toList();
+  List<WebDavEntry> get _images =>
+      _entries.where((e) => !e.isDirectory && _isImageName(e.name)).toList();
 
   /// 库模式：只要当前目录有图片**或有子文件夹**就允许导入
   bool get _canImport {
@@ -249,9 +248,8 @@ class _WebDavBrowseScreenState extends State<WebDavBrowseScreen> {
           ],
         ),
         body: _active == null ? _buildConnectionChooser() : _buildBrowser(),
-        bottomNavigationBar: _active != null && _canImport
-            ? _buildImportBar()
-            : null,
+        bottomNavigationBar:
+            _active != null && _canImport ? _buildImportBar() : null,
       ),
     );
   }
@@ -263,7 +261,8 @@ class _WebDavBrowseScreenState extends State<WebDavBrowseScreen> {
       padding: const EdgeInsets.all(16),
       children: [
         if (_connections.isNotEmpty) ...[
-          const Text('选择一个 WebDAV 网盘', style: TextStyle(fontWeight: FontWeight.w600)),
+          const Text('选择一个 WebDAV 网盘',
+              style: TextStyle(fontWeight: FontWeight.w600)),
           const SizedBox(height: 8),
           ..._connections.map((c) => Card(
                 margin: const EdgeInsets.only(bottom: 8),
@@ -386,8 +385,7 @@ class _WebDavBrowseScreenState extends State<WebDavBrowseScreen> {
         action: SnackBarAction(
           label: '知道了',
           textColor: Colors.white,
-          onPressed: () =>
-              ScaffoldMessenger.of(context).hideCurrentSnackBar(),
+          onPressed: () => ScaffoldMessenger.of(context).hideCurrentSnackBar(),
         ),
       ));
   }
@@ -425,7 +423,8 @@ class _WebDavBrowseScreenState extends State<WebDavBrowseScreen> {
               InkWell(
                 onTap: isLast ? null : () => _goTo(i),
                 child: Padding(
-                  padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 8),
+                  padding:
+                      const EdgeInsets.symmetric(horizontal: 6, vertical: 8),
                   child: Text(
                     _stack[i].name,
                     style: TextStyle(
@@ -575,7 +574,9 @@ class _WebDavBrowseScreenState extends State<WebDavBrowseScreen> {
             const SizedBox(width: 8),
             FilledButton.icon(
               icon: Icon(
-                lib ? Icons.library_add_outlined : Icons.download_for_offline_outlined,
+                lib
+                    ? Icons.library_add_outlined
+                    : Icons.download_for_offline_outlined,
                 size: 18,
               ),
               label: Text(lib ? '添加为库' : '导入'),
@@ -662,7 +663,8 @@ class _ConnectionFormState extends State<_ConnectionForm> {
       children: [
         Text(
           '添加 WebDAV 网盘',
-          style: theme.textTheme.titleMedium?.copyWith(fontWeight: FontWeight.w600),
+          style: theme.textTheme.titleMedium
+              ?.copyWith(fontWeight: FontWeight.w600),
         ),
         const SizedBox(height: 4),
         Text(
@@ -681,7 +683,6 @@ class _ConnectionFormState extends State<_ConnectionForm> {
           decoration: const InputDecoration(
             labelText: '服务器地址',
             hintText: '192.168.1.10:5006',
-
             prefixIcon: Icon(Icons.link),
             helperText: '飞牛 OS：设置 → 文件服务 → WebDAV（默认端口 5005 / 5006）'
                 '\n只填 IP:端口 也可以，http/https 会自动识别',
@@ -699,7 +700,6 @@ class _ConnectionFormState extends State<_ConnectionForm> {
           autocorrect: false,
           decoration: const InputDecoration(
             labelText: '用户名',
-
             prefixIcon: Icon(Icons.person_outline),
           ),
         ),
@@ -711,7 +711,6 @@ class _ConnectionFormState extends State<_ConnectionForm> {
           decoration: InputDecoration(
             labelText: '密码',
             helperText: '多数网盘的 WebDAV 密码要单独生成，不是登录密码',
-
             prefixIcon: const Icon(Icons.lock_outline),
             suffixIcon: IconButton(
               icon: Icon(_obscure ? Icons.visibility_off : Icons.visibility),
@@ -725,7 +724,6 @@ class _ConnectionFormState extends State<_ConnectionForm> {
           decoration: const InputDecoration(
             labelText: '备注名（可选）',
             hintText: '家里的飞牛',
-
             prefixIcon: Icon(Icons.label_outline),
           ),
         ),
@@ -753,8 +751,7 @@ class _ConnectionFormState extends State<_ConnectionForm> {
           child: Row(
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
-              Icon(Icons.lightbulb_outline,
-                  size: 18, color: theme.hintColor),
+              Icon(Icons.lightbulb_outline, size: 18, color: theme.hintColor),
               const SizedBox(width: 8),
               Expanded(
                 child: RichText(

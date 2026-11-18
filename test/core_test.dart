@@ -52,13 +52,17 @@ void main() {
     test('识别 zip / rar / 7z / pdf / gif', () {
       expect(MagicDetector.detect(_bytes([0x50, 0x4B, 0x03, 0x04])),
           ContainerFormat.zip);
-      expect(MagicDetector.detect(_bytes([0x52, 0x61, 0x72, 0x21, 0x1A, 0x07, 0x01, 0x00])),
+      expect(
+          MagicDetector.detect(
+              _bytes([0x52, 0x61, 0x72, 0x21, 0x1A, 0x07, 0x01, 0x00])),
           ContainerFormat.rar5);
       expect(MagicDetector.detect(_bytes([0x37, 0x7A, 0xBC, 0xAF, 0x27, 0x1C])),
           ContainerFormat.sevenZip);
       expect(MagicDetector.detect(_bytes([0x25, 0x50, 0x44, 0x46])),
           ContainerFormat.pdf);
-      expect(MagicDetector.detect(_bytes([0x89, 0x50, 0x4E, 0x47, 0x0D, 0x0A, 0x1A, 0x0A])),
+      expect(
+          MagicDetector.detect(
+              _bytes([0x89, 0x50, 0x4E, 0x47, 0x0D, 0x0A, 0x1A, 0x0A])),
           ContainerFormat.png);
     });
   });
@@ -170,8 +174,12 @@ void main() {
 
     test('ISO-BMFF 里没有 ispe 时返回 null（不瞎猜）', () {
       final mp4 = _bytes([
-        ..._be32(24), ..._ascii('ftyp'), ..._ascii('isom'),
-        ..._be32(512), ..._ascii('isom'), ..._ascii('mp41'),
+        ..._be32(24),
+        ..._ascii('ftyp'),
+        ..._ascii('isom'),
+        ..._be32(512),
+        ..._ascii('isom'),
+        ..._ascii('mp41'),
       ]);
       expect(ImageHeaderParser.tryParse(mp4), isNull);
     });
@@ -184,7 +192,8 @@ void main() {
         ContainerFormat.jpeg,
       );
       expect(
-        MagicDetector.detect(_bytes([0x89, 0x50, 0x4E, 0x47, 0x0D, 0x0A, 0x1A, 0x0A])),
+        MagicDetector.detect(
+            _bytes([0x89, 0x50, 0x4E, 0x47, 0x0D, 0x0A, 0x1A, 0x0A])),
         ContainerFormat.png,
       );
       expect(
@@ -208,7 +217,8 @@ void main() {
         ContainerFormat.tiff,
       );
       expect(
-        MagicDetector.detect(_bytes([0x71, 0x6F, 0x69, 0x66, 0, 0, 0, 1, 0, 0, 0, 1])),
+        MagicDetector.detect(
+            _bytes([0x71, 0x6F, 0x69, 0x66, 0, 0, 0, 1, 0, 0, 0, 1])),
         ContainerFormat.qoi,
       );
     });
@@ -242,14 +252,19 @@ void main() {
 
     test('mp4 不会被误判成图片', () {
       final mp4 = _bytes([
-        ..._be32(24), ..._ascii('ftyp'), ..._ascii('isom'),
-        ..._be32(512), ..._ascii('isom'), ..._ascii('mp41'),
+        ..._be32(24),
+        ..._ascii('ftyp'),
+        ..._ascii('isom'),
+        ..._be32(512),
+        ..._ascii('isom'),
+        ..._ascii('mp41'),
       ]);
       expect(MagicDetector.detect(mp4), ContainerFormat.unknown);
     });
 
     test('SVG 被识别为文本类（Flutter 不能直接渲染）', () {
-      final svg = _bytes(_ascii('<svg xmlns="http://www.w3.org/2000/svg"></svg>'));
+      final svg =
+          _bytes(_ascii('<svg xmlns="http://www.w3.org/2000/svg"></svg>'));
       final fmt = MagicDetector.detect(svg);
       expect(fmt, ContainerFormat.svg);
       expect(fmt.isRenderableImage, isFalse);
@@ -355,11 +370,13 @@ void main() {
       await zip.open();
 
       final names = zip.entries.map((e) => e.entryPath).toList();
-      expect(names, containsAll(['第01话/001.jpg', '第01话/002.jpg', 'readme.txt']));
+      expect(
+          names, containsAll(['第01话/001.jpg', '第01话/002.jpg', 'readme.txt']));
       expect(zip.entries.length, 3);
 
       // 按需读第一个条目
-      final first = zip.entries.firstWhere((e) => e.entryPath == '第01话/001.jpg');
+      final first =
+          zip.entries.firstWhere((e) => e.entryPath == '第01话/001.jpg');
       final data = await zip.readEntry(first);
       expect(data, [1, 2, 3, 4, 5]);
 
@@ -471,7 +488,8 @@ void main() {
   group('文件夹导入的诊断能力（修 "识别不了图片" 的关键）', () {
     test('content:// 地址给出明确的 SAF 提示，而不是静默失败', () async {
       await expectLater(
-        ensureReadableDirectory('content://com.android.externalstorage.documents/tree/primary'),
+        ensureReadableDirectory(
+            'content://com.android.externalstorage.documents/tree/primary'),
         throwsA(
           isA<AppError>().having(
             (e) => e.message,
@@ -632,7 +650,10 @@ Uint8List _isobmffWithIspe({
 
   // meta box：payload 前面有 4 字节 version/flags
   final metaPayload = <int>[
-    0x00, 0x00, 0x00, 0x00,
+    0x00,
+    0x00,
+    0x00,
+    0x00,
     ...iprp,
   ];
   final meta = <int>[
@@ -645,8 +666,7 @@ Uint8List _isobmffWithIspe({
   final ftypPayload = <int>[
     ..._ascii(majorBrand.padRight(4).substring(0, 4)),
     ..._be32(0), // minor version
-    for (final b in compatibleBrands)
-      ..._ascii(b.padRight(4).substring(0, 4)),
+    for (final b in compatibleBrands) ..._ascii(b.padRight(4).substring(0, 4)),
   ];
   final ftyp = <int>[
     ..._be32(8 + ftypPayload.length),

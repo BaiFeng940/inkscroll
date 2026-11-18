@@ -14,16 +14,19 @@ import 'dart:typed_data';
 enum EncodingDetectionMethod { bom, utf8Validation, asciiOnly, fallback }
 
 class CharsetResult {
-  const CharsetResult(this.encoding, {required this.method, this.confidence = 1.0});
+  const CharsetResult(this.encoding,
+      {required this.method, this.confidence = 1.0});
 
-  final String encoding; // 'utf-8' | 'utf-16le' | 'utf-16be' | 'utf-32le' | 'utf-32be'
+  final String
+      encoding; // 'utf-8' | 'utf-16le' | 'utf-16be' | 'utf-32le' | 'utf-32be'
   final EncodingDetectionMethod method;
   final double confidence;
 
   bool get isUtf8 => encoding == 'utf-8';
 
   @override
-  String toString() => '$encoding (${method.name}, ${confidence.toStringAsFixed(2)})';
+  String toString() =>
+      '$encoding (${method.name}, ${confidence.toStringAsFixed(2)})';
 }
 
 class CharsetDetector {
@@ -107,10 +110,12 @@ class CharsetDetector {
   static CharsetResult? _detectBom(Uint8List b) {
     if (b.length >= 4) {
       if (b[0] == 0xFF && b[1] == 0xFE && b[2] == 0x00 && b[3] == 0x00) {
-        return const CharsetResult('utf-32le', method: EncodingDetectionMethod.bom);
+        return const CharsetResult('utf-32le',
+            method: EncodingDetectionMethod.bom);
       }
       if (b[0] == 0x00 && b[1] == 0x00 && b[2] == 0xFE && b[3] == 0xFF) {
-        return const CharsetResult('utf-32be', method: EncodingDetectionMethod.bom);
+        return const CharsetResult('utf-32be',
+            method: EncodingDetectionMethod.bom);
       }
     }
     if (b.length >= 3 && b[0] == 0xEF && b[1] == 0xBB && b[2] == 0xBF) {
@@ -118,10 +123,12 @@ class CharsetDetector {
     }
     if (b.length >= 2) {
       if (b[0] == 0xFF && b[1] == 0xFE) {
-        return const CharsetResult('utf-16le', method: EncodingDetectionMethod.bom);
+        return const CharsetResult('utf-16le',
+            method: EncodingDetectionMethod.bom);
       }
       if (b[0] == 0xFE && b[1] == 0xFF) {
-        return const CharsetResult('utf-16be', method: EncodingDetectionMethod.bom);
+        return const CharsetResult('utf-16be',
+            method: EncodingDetectionMethod.bom);
       }
     }
     // UTF-8 BOM 的字节有时只被读进来 2 个（分块边界）
@@ -181,12 +188,15 @@ class CharsetDetector {
     // 跳过 BOM
     int start = 0;
     if (b.length >= 2) {
-      if ((b[0] == 0xFF && b[1] == 0xFE) || (b[0] == 0xFE && b[1] == 0xFF)) start = 2;
+      if ((b[0] == 0xFF && b[1] == 0xFE) || (b[0] == 0xFE && b[1] == 0xFF)) {
+        start = 2;
+      }
     }
     final end = b.length - ((b.length - start) % 2);
     final codeUnits = <int>[];
     for (int i = start; i < end; i += 2) {
-      codeUnits.add(littleEndian ? (b[i] | (b[i + 1] << 8)) : ((b[i] << 8) | b[i + 1]));
+      codeUnits.add(
+          littleEndian ? (b[i] | (b[i + 1] << 8)) : ((b[i] << 8) | b[i + 1]));
     }
     return String.fromCharCodes(codeUnits);
   }

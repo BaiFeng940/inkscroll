@@ -124,7 +124,8 @@ ParsedText parsePlainText(Uint8List bytes, String name) {
   } else {
     // 第一段（第一个标题之前的内容）单独成章
     if (merged.first.offset > 200) {
-      chapters.addAll(_hardSplit(text.substring(0, merged.first.offset), '卷首', 0));
+      chapters
+          .addAll(_hardSplit(text.substring(0, merged.first.offset), '卷首', 0));
     }
     for (int i = 0; i < merged.length; i++) {
       final start = merged[i].offset;

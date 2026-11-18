@@ -103,7 +103,8 @@ class MemoryByteSource implements RandomAccessByteSource {
   @override
   Future<Uint8List> read(int offset, int length) async {
     if (offset >= _bytes.length) return Uint8List(0);
-    final end = (offset + length > _bytes.length) ? _bytes.length : offset + length;
+    final end =
+        (offset + length > _bytes.length) ? _bytes.length : offset + length;
     return Uint8List.sublistView(_bytes, offset, end);
   }
 

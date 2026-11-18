@@ -38,7 +38,8 @@ class PdfNative {
 
   /// 打开并读取页数/尺寸。失败抛异常（调用方转成 AppError）。
   Future<PdfInfo> open(String path) async {
-    final r = await _ch.invokeMapMethod<String, dynamic>('open', {'path': path});
+    final r =
+        await _ch.invokeMapMethod<String, dynamic>('open', {'path': path});
     if (r == null) throw StateError('PDF 打开失败');
     return PdfInfo(
       pageCount: (r['pageCount'] as int?) ?? 0,

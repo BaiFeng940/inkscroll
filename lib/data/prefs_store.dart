@@ -129,6 +129,7 @@ class PrefsStore {
   Future<void> saveZipPasswords(List<String> list) async {
     await _prefs.setStringList(_kZipPasswords, list);
   }
+
   DateTime? loadLastUpdateCheck() {
     final ms = _prefs.getInt(_kLastUpdateCheck);
     if (ms == null) return null;
@@ -231,7 +232,8 @@ class PrefsStore {
   }
 
   /// 一次性读出所有模式的进度，用于打开书时决定恢复哪一条
-  Future<Map<ReadingMode, ReadingProgress>> loadAllProgress(String bookId) async {
+  Future<Map<ReadingMode, ReadingProgress>> loadAllProgress(
+      String bookId) async {
     final out = <ReadingMode, ReadingProgress>{};
     for (final m in ReadingMode.values) {
       final raw = _prefs.getString(_progressKey(bookId, m));

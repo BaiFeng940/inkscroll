@@ -31,8 +31,7 @@ import 'package:shared_preferences/shared_preferences.dart';
 // 假 WebDAV 服务器
 // ---------------------------------------------------------------------------
 
-String _multistatus(String body) =>
-    '<?xml version="1.0" encoding="utf-8"?>\n'
+String _multistatus(String body) => '<?xml version="1.0" encoding="utf-8"?>\n'
     '<D:multistatus xmlns:D="DAV:">$body</D:multistatus>';
 
 String _response({
@@ -192,8 +191,7 @@ void main() {
       var dropped = false;
       final flaky = MockClient((req) async {
         final segs = req.url.pathSegments;
-        final isCollection =
-            req.method == 'PROPFIND' && segs.contains('A合集');
+        final isCollection = req.method == 'PROPFIND' && segs.contains('A合集');
         if (!dropped && isCollection) {
           dropped = true;
           return http.Response(
@@ -281,7 +279,11 @@ void main() {
       expect(merged.chapters[1].pageIds.first, 'c1_n:0');
       // 阅读顺序：整本连续，不按话重置
       expect(merged.pagesInOrder.map((p) => p.id).toList(), [
-        'c0_n:0', 'c0_n:1', 'c0_n:2', 'c1_n:0', 'c1_n:1',
+        'c0_n:0',
+        'c0_n:1',
+        'c0_n:2',
+        'c1_n:0',
+        'c1_n:1',
       ]);
       expect(merged.pages.keys.length, 5); // id 全局唯一
     });
@@ -346,14 +348,12 @@ void main() {
         }
         // 压缩包 URL 回 zip 字节，其它回图片字节
         final body = req.url.path.endsWith('.zip') ? zipBytes : <int>[...png];
-        final range =
-            req.headers['Range'] ?? req.headers['range'];
+        final range = req.headers['Range'] ?? req.headers['range'];
         if (range != null) {
           final m = RegExp(r'bytes=(\d+)-(\d*)').firstMatch(range)!;
           final start = int.parse(m.group(1)!);
-          final end = m.group(2)!.isEmpty
-              ? body.length - 1
-              : int.parse(m.group(2)!);
+          final end =
+              m.group(2)!.isEmpty ? body.length - 1 : int.parse(m.group(2)!);
           if (start >= body.length) return http.Response('', 416);
           final stop = (end + 1).clamp(0, body.length);
           return http.Response.bytes(body.sublist(start, stop), 206);

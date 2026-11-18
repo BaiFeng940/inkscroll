@@ -29,7 +29,8 @@ class ArchiveFactory {
   }) async {
     switch (format) {
       case ArchiveFormat.zip:
-        final zip = ZipArchiveSource(src, maxEntryBytes: maxEntryBytes, cache: cache);
+        final zip =
+            ZipArchiveSource(src, maxEntryBytes: maxEntryBytes, cache: cache);
         await zip.open();
         return zip;
       case ArchiveFormat.tar:

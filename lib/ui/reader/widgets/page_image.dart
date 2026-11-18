@@ -220,8 +220,10 @@ class _PageImageState extends State<PageImage> {
           child: const _LoadingPlaceholder(),
         );
       }
-      // 连估算值都没有（极少见）→ 给一个保守的高占位，避免零高度重排
-      return const _LoadingPlaceholder();
+      // 连估算值都没有（极少见）→ 给一个保守的高占位，避免零高度重排。
+      // 旧实现直接放 _LoadingPlaceholder（22px 高的窄条 spinner），
+      // 恰好复现了它想避免的"解码后高度跳变"。
+      return const SizedBox(height: 240, child: _LoadingPlaceholder());
     }
 
     // ★ 显式构造 ImageProvider，并用 [ResizeImage] 限制解码宽度。
@@ -267,10 +269,21 @@ class _PageImageState extends State<PageImage> {
 
     // 长页模式：直接给出图片，高度由解码器按真实比例决定。
     // 翻页模式：外层用 [PageViewportFrame] 做「未超屏居中 / 超屏顶部对齐」。
-    if (widget.layoutMode == PageLayoutMode.fitViewport) {
-      return PageViewportFrame(child: image);
-    }
-    return image;
+    final Widget content = widget.layoutMode == PageLayoutMode.fitViewport
+        ? PageViewportFrame(child: image)
+        : image;
+
+    // 页面内容渐入：解码完成 0 → 1（200ms），替代"突然出现"。
+    // key 绑定页 id：换页时占位 → 图片是新元素，动画重新走一遍；
+    // 同一页的重建（setState / 父级 rebuild）不会重启动画。
+    return TweenAnimationBuilder<double>(
+      key: ValueKey(widget.page.id),
+      tween: Tween(begin: 0.0, end: 1.0),
+      duration: const Duration(milliseconds: 200),
+      curve: Curves.easeOut,
+      builder: (ctx, v, child) => Opacity(opacity: v, child: child),
+      child: content,
+    );
   }
 }
 
@@ -343,7 +356,8 @@ class _ErrorPlaceholder extends StatelessWidget {
           child: Column(
             mainAxisSize: MainAxisSize.min,
             children: [
-              const Icon(Icons.broken_image_outlined, color: Colors.white38, size: 36),
+              const Icon(Icons.broken_image_outlined,
+                  color: Colors.white38, size: 36),
               const SizedBox(height: 12),
               Text(
                 message,
@@ -361,4 +375,3 @@ class _ErrorPlaceholder extends StatelessWidget {
     );
   }
 }
-

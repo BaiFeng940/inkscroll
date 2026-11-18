@@ -182,7 +182,10 @@ class _ImageOrderSheetState extends State<_ImageOrderSheet> {
                   final highlighted = i == _lastMoved;
                   return Container(
                     color: highlighted
-                        ? Theme.of(context).colorScheme.primary.withValues(alpha: 0.12)
+                        ? Theme.of(context)
+                            .colorScheme
+                            .primary
+                            .withValues(alpha: 0.12)
                         : null,
                     padding: const EdgeInsets.symmetric(horizontal: 12),
                     child: Row(
@@ -195,7 +198,9 @@ class _ImageOrderSheetState extends State<_ImageOrderSheet> {
                             style: TextStyle(
                               color: fg.withValues(alpha: 0.5),
                               fontSize: 12,
-                              fontFeatures: const [FontFeature.tabularFigures()],
+                              fontFeatures: const [
+                                FontFeature.tabularFigures()
+                              ],
                             ),
                           ),
                         ),
@@ -222,7 +227,8 @@ class _ImageOrderSheetState extends State<_ImageOrderSheet> {
                         _IconBtn(
                           icon: Icons.keyboard_arrow_down,
                           tooltip: '下移',
-                          onTap: i == _order.length - 1 ? null : () => _move(i, 1),
+                          onTap:
+                              i == _order.length - 1 ? null : () => _move(i, 1),
                           fg: fg,
                         ),
                       ],

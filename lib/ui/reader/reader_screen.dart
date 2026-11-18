@@ -13,15 +13,17 @@
 ///    见 DESIGN.md §3.2.2。
 library;
 
+import 'dart:async';
+
 import 'package:flutter/material.dart';
 import 'package:flutter/rendering.dart' show ScrollCacheExtent;
 import 'package:flutter/services.dart';
-import 'package:provider/provider.dart';
 
 import '../../core/errors.dart';
 import '../../core/image_header.dart';
 import '../../data/archive_extractor.dart';
 import '../../data/byte_store.dart';
+import '../../data/display_channel.dart';
 import '../../data/models/book_meta.dart';
 import '../../data/models/reader_settings.dart';
 import '../../data/prefs_store.dart';
@@ -54,7 +56,8 @@ class ReaderScreen extends StatefulWidget {
   final ByteStore? store;
 
   /// 由 AppState 提供的装载函数（含 resolver）
-  final Future<({Document document, PageByteResolver resolver})> Function() resolveDocument;
+  final Future<({Document document, PageByteResolver resolver})> Function()
+      resolveDocument;
 
   final ValueChanged<ReaderSettings> onSettingsChanged;
 
@@ -62,7 +65,8 @@ class ReaderScreen extends StatefulWidget {
   State<ReaderScreen> createState() => _ReaderScreenState();
 }
 
-class _ReaderScreenState extends State<ReaderScreen> {
+class _ReaderScreenState extends State<ReaderScreen>
+    with TickerProviderStateMixin {
   ReaderController? _controller;
   Object? _fatalError;
   bool _loading = true;
@@ -70,12 +74,37 @@ class _ReaderScreenState extends State<ReaderScreen> {
   final ScrollController _verticalScroll = ScrollController();
   PageController? _horizontalPager;
 
+  // ── 双击缩放：真实矩阵由 TransformationController 持有 ──
+  // 旧实现只改仲裁器内部状态、从不碰 InteractiveViewer 的变换，
+  // 双击后画面不放大却锁住翻页 —— 这是审计报告里的 P1 级缺陷。
+  final TransformationController _zoomCtrl = TransformationController();
+  AnimationController? _zoomAnim;
+  Matrix4Tween? _zoomTween;
+  late final _ZoomHost _zoomHost = _ZoomHost(this);
+
+  void _animateZoomTo(Matrix4 target) {
+    _zoomAnim?.dispose();
+    final anim = AnimationController(
+      vsync: this,
+      duration: const Duration(milliseconds: 220),
+    );
+    _zoomAnim = anim;
+    _zoomTween = Matrix4Tween(begin: _zoomCtrl.value.clone(), end: target);
+    anim.addListener(() {
+      final t = _zoomTween;
+      if (t != null) _zoomCtrl.value = t.evaluate(anim);
+    });
+    anim.forward();
+  }
+
   @override
   void initState() {
     super.initState();
     // 阅读时进入沉浸式（隐藏状态栏 / 导航栏）。
     // 之前这一步被写在 dispose() 里 —— 那是反的：离开阅读器才隐藏系统栏。
     SystemChrome.setEnabledSystemUIMode(SystemUiMode.immersiveSticky);
+    // 屏幕常亮（设置项，旧实现只存了值没有任何调用点，从不生效）
+    unawaited(DisplayChannel.setKeepScreenOn(widget.settings.keepScreenOn));
     _bootstrap();
   }
 
@@ -89,6 +118,9 @@ class _ReaderScreenState extends State<ReaderScreen> {
         prefs: widget.prefs,
         resolver: resolved.resolver,
       );
+      controller.zoomHost = _zoomHost;
+      // 跳转/切模式时除了复位仲裁器状态，还要把真实矩阵一并归零
+      controller.onZoomReset = () => _zoomHost.jumpTo(Matrix4.identity());
 
       // 默认模式：这本书上次用过的 > 用户在设置里指定的 > 按内容自动判断
       final remembered = widget.settings.lastModePerBook[widget.book.id];
@@ -104,7 +136,6 @@ class _ReaderScreenState extends State<ReaderScreen> {
         _controller = controller;
         _loading = false;
       });
-
 
       await controller.loadDocument(() => resolved.document);
 
@@ -164,11 +195,14 @@ class _ReaderScreenState extends State<ReaderScreen> {
     _controller?.dispose();
     _verticalScroll.dispose();
     _horizontalPager?.dispose();
-    // 离开阅读器时恢复正常系统栏（进入时设的 immersive 在这里还原）
+    _zoomAnim?.dispose();
+    _zoomCtrl.dispose();
+    // 离开阅读器：恢复正常系统栏 + 关掉常亮
     SystemChrome.setEnabledSystemUIMode(
       SystemUiMode.manual,
       overlays: SystemUiOverlay.values,
     );
+    unawaited(DisplayChannel.setKeepScreenOn(false));
     super.dispose();
   }
 
@@ -203,6 +237,8 @@ class _ReaderScreenState extends State<ReaderScreen> {
       return;
     }
     _lastViewport = size;
+    final c = _controller;
+    if (c != null) c.lastViewportSize = size;
     // 真正的重建推迟到帧末，脱离 build 路径
     WidgetsBinding.instance.addPostFrameCallback((_) {
       if (!mounted) return;
@@ -234,81 +270,89 @@ class _ReaderScreenState extends State<ReaderScreen> {
     final c = _controller!;
     final doc = c.document!;
 
-    return ChangeNotifierProvider<ReaderController>.value(
-      value: c,
-      // 监听 controller 以便：
-      //   - 菜单显隐时调整进度条位置
-      //   - 设置变更（背景/字号/亮度）立即生效
-      // 注意：**滚动进度不走这里**（它只通知 progressRatio 这个 ValueNotifier），
-      //       否则每帧都会重建整棵树。见 DESIGN.md §3.3.1。
-      child: AnimatedBuilder(
-        animation: c,
-        builder: (context, _) {
-          final s = c.settings;
-          return Scaffold(
-            backgroundColor: s.background.color,
-            body: LayoutBuilder(
-              builder: (context, constraints) {
-                final size = Size(constraints.maxWidth, constraints.maxHeight);
-                // 尺寸变化（横竖屏切换 / 分屏拖拽）时重算度量。
-                // 在这里同步重建 metrics；位置恢复放在 post-frame 回调里。
-                _recordViewport(size);
+    // 监听 controller 以便：
+    //   - 菜单显隐时调整进度条位置
+    //   - 设置变更（背景/字号/亮度）立即生效
+    // 注意：**滚动进度不走这里**（它只通知 progressRatio 这个 ValueNotifier），
+    //       否则每帧都会重建整棵树。见 DESIGN.md §3.3.1。
+    //（旧版这里还套了一层无人消费的 ChangeNotifierProvider，已移除）
+    return AnimatedBuilder(
+      animation: c,
+      builder: (context, _) {
+        final s = c.settings;
+        return Scaffold(
+          backgroundColor: s.background.color,
+          body: LayoutBuilder(
+            builder: (context, constraints) {
+              final size = Size(constraints.maxWidth, constraints.maxHeight);
+              // 尺寸变化（横竖屏切换 / 分屏拖拽）时重算度量。
+              // 在这里同步重建 metrics；位置恢复放在 post-frame 回调里。
+              _recordViewport(size);
 
-                return Stack(
-                  children: [
-                    Positioned.fill(child: _buildReader(c, doc, size)),
+              return Stack(
+                children: [
+                  Positioned.fill(child: _buildReader(c, doc, size)),
 
-                    // 菜单（点击中间显示/隐藏）
-                    if (c.menuVisible)
-                      _ReaderMenuOverlay(
-                        controller: c,
-                        document: doc,
-                        settings: s,
-                        onClose: c.hideMenu,
-                        onSettingsChanged: _applySettings,
-                        onModeChanged: (mode) {
-                          _applySettings(s.copyWith(mode: mode));
-                          c.switchMode(mode);
-                        },
-                        extraction: widget.extraction,
-                        bookId: widget.book.id,
-                        store: widget.store,
-                      ),
+                  // 菜单（点击中间显示/隐藏）。
+                  // 始终存在、用动画进出（visible 控制），
+                  // 否则条件插入只能做到"瞬变"，没有任何过渡。
+                  _ReaderMenuOverlay(
+                    visible: c.menuVisible,
+                    controller: c,
+                    document: doc,
+                    settings: s,
+                    onClose: c.hideMenu,
+                    onSettingsChanged: _applySettings,
+                    onModeChanged: (mode) {
+                      _applySettings(s.copyWith(mode: mode));
+                      c.switchMode(mode);
+                    },
+                    extraction: widget.extraction,
+                    bookId: widget.book.id,
+                    store: widget.store,
+                  ),
 
-                    // 进度条：直接监听 ValueNotifier，与列表重建解耦
-                    Positioned(
-                      left: 0,
-                      right: 0,
-                      bottom: c.menuVisible ? 72 : 0,
-                      child: ReaderProgressBar(controller: c),
-                    ),
+                  // 进度条：直接监听 ValueNotifier，与列表重建解耦。
+                  // 位置随菜单显隐滑动过渡（旧版是瞬变）。
+                  AnimatedPositioned(
+                    duration: const Duration(milliseconds: 200),
+                    curve: Curves.easeOutCubic,
+                    left: 0,
+                    right: 0,
+                    bottom: c.menuVisible ? 72 : 0,
+                    child: ReaderProgressBar(controller: c),
+                  ),
 
-
-                    // 亮度遮罩（不改系统亮度，只在阅读器内压暗）
-                    if (s.screenBrightness < 1.0)
-                      Positioned.fill(
-                        child: IgnorePointer(
-                          child: ColoredBox(
-                            color: Colors.black.withValues(
-                              alpha: (1.0 - s.screenBrightness).clamp(0.0, 0.85),
-                            ),
+                  // 亮度遮罩（不改系统亮度，只在阅读器内压暗）
+                  if (s.screenBrightness < 1.0)
+                    Positioned.fill(
+                      child: IgnorePointer(
+                        child: ColoredBox(
+                          color: Colors.black.withValues(
+                            alpha: (1.0 - s.screenBrightness).clamp(0.0, 0.85),
                           ),
                         ),
                       ),
-                  ],
-                );
-              },
-            ),
-          );
-        },
-      ),
+                    ),
+                ],
+              );
+            },
+          ),
+        );
+      },
     );
   }
 
   /// 设置变更：本地立即生效，同步给 controller（点击区域等要用），并上报落盘
-  void _applySettings(ReaderSettings next) {
-    _controller?.settings = next;
+  ReaderSettings? _lastAppliedSettings;
 
+  void _applySettings(ReaderSettings next) {
+    final prev = _lastAppliedSettings ?? widget.settings;
+    _controller?.settings = next;
+    if (prev.keepScreenOn != next.keepScreenOn) {
+      unawaited(DisplayChannel.setKeepScreenOn(next.keepScreenOn));
+    }
+    _lastAppliedSettings = next;
     widget.onSettingsChanged(next);
   }
 
@@ -371,7 +415,8 @@ class _ReaderScreenState extends State<ReaderScreen> {
   //   并在每页解码后把真实比例喂回去（onDimensionResolved），
   //   使估算随阅读收敛；跳转时再按"下落到的实际页码"做一次修正。
   // ------------------------------------------------------------------
-  Widget _buildVertical(ReaderController c, Document doc, ReaderSettings settings) {
+  Widget _buildVertical(
+      ReaderController c, Document doc, ReaderSettings settings) {
     final pages = doc.pagesInOrder;
 
     // 估算几何：仅用于进度显示与百分比跳转（不参与渲染）。
@@ -380,7 +425,6 @@ class _ReaderScreenState extends State<ReaderScreen> {
     //   `notifyListeners()`，而外层 AnimatedBuilder 正在 build，
     //   会形成渲染死循环（实测表现：加载圈缩小、日志 "Skipped 127 frames"、
     //   图片永远加载不出来）。重建统一由 [_recordViewport] 在帧末触发。
-
 
     return AnimatedBuilder(
       animation: c.arbiter,
@@ -434,9 +478,11 @@ class _ReaderScreenState extends State<ReaderScreen> {
   ///
   ///   只在用户**主动跳转**（进度条拖动）时才需要修正，
   ///   那条路径由 [ReaderController.jumpToRatioConverging] 负责。
-  void _onDimensionResolved(ReaderController c, String pageId, ImageDimension dim) {
+  void _onDimensionResolved(
+      ReaderController c, String pageId, ImageDimension dim) {
     if (!c.backfillAspect(pageId, dim)) return;
-    final width = _lastViewport?.width ?? MediaQuery.maybeSizeOf(context)?.width ?? 1080;
+    final width =
+        _lastViewport?.width ?? MediaQuery.maybeSizeOf(context)?.width ?? 1080;
     // 合并到下一帧、并做 300ms 防抖，避免每解码一页就全量重算
     c.scheduleMetricsRebuild(width);
   }
@@ -444,75 +490,82 @@ class _ReaderScreenState extends State<ReaderScreen> {
   // ------------------------------------------------------------------
   // 模式 ① ②：左右翻页（共用一个 PageView，差异在手势层）
   // ------------------------------------------------------------------
-  Widget _buildHorizontal(ReaderController c, Document doc, ReaderSettings settings) {
+  Widget _buildHorizontal(
+      ReaderController c, Document doc, ReaderSettings settings) {
     final pages = doc.pagesInOrder;
 
     _horizontalPager ??= PageController(initialPage: c.progress.pageIndex);
     c.attachHorizontalPager(_horizontalPager!);
 
-    return AnimatedBuilder(
-      animation: c.arbiter,
-      builder: (context, _) {
-        return InteractiveViewer(
-          // 缩放到 >1 时，翻页必须让位给平移
-          panEnabled: c.arbiter.isZoomed,
-          scaleEnabled: true,
-          minScale: 1.0,
-          maxScale: 5.0,
-          // ★ 允许无限平移的边界，配合仲裁器实现"边缘交接"
-          boundaryMargin: const EdgeInsets.all(double.infinity),
-          onInteractionStart: (d) => c.arbiter.onScaleStart(
-            ScaleStartDetails(
-              focalPoint: d.focalPoint,
-              localFocalPoint: d.localFocalPoint,
-              pointerCount: d.pointerCount,
+    // ★ 竖屏翻页时在页面上方预留安全区：状态栏 / 通知图标 / 挖孔
+    //   会遮挡顶到屏幕顶的内容（用户要求"首张漫画上方留空"）。
+    //   沉浸式隐藏了系统栏，但 viewPadding 依然报告挖孔/状态栏高度，
+    //   所以这里用 viewPadding 而不是 padding。可在设置里关闭。
+    final topInset = (settings.reserveTopInset &&
+            MediaQuery.orientationOf(context) == Orientation.portrait)
+        ? MediaQuery.viewPaddingOf(context).top
+        : 0.0;
+
+    return Padding(
+      padding: EdgeInsets.only(top: topInset),
+      child: AnimatedBuilder(
+        animation: c.arbiter,
+        builder: (context, _) {
+          // 仲裁器需要的"阅读区尺寸"：减去顶部留白后的真实视口
+          final mqSize = MediaQuery.sizeOf(context);
+          final viewSize = Size(
+            mqSize.width,
+            (mqSize.height - topInset).clamp(0.0, mqSize.height),
+          );
+          return InteractiveViewer(
+            // ★ 真实变换矩阵：双击缩放动画与仲裁判定都认它
+            transformationController: _zoomCtrl,
+            // 缩放到 >1 时启用平移；scale == 1 时边界为零、平移不动，
+            // 拖动自然由 PageView 接管翻页
+            panEnabled: c.arbiter.isZoomed,
+            scaleEnabled: true,
+            minScale: 1.0,
+            maxScale: 5.0,
+            // ★ 真实边界（旧版是无限边界）：平移被钳制在内容范围内，
+            //   "边缘交接"改用矩阵平移量判定，不再靠方向启发式硬猜
+            boundaryMargin: EdgeInsets.zero,
+            onInteractionStart: (d) => c.arbiter.onInteractionStart(d),
+            onInteractionUpdate: (d) => c.arbiter.onInteractionUpdate(
+              d,
+              transform: _zoomCtrl.value,
+              viewSize: viewSize,
             ),
-          ),
-          onInteractionUpdate: (d) => c.arbiter.onScaleUpdate(
-            ScaleUpdateDetails(
-              focalPoint: d.focalPoint,
-              localFocalPoint: d.localFocalPoint,
-              scale: d.scale,
-              horizontalScale: d.horizontalScale,
-              verticalScale: d.verticalScale,
-              rotation: d.rotation,
-              pointerCount: d.pointerCount,
-              focalPointDelta: d.focalPointDelta,
+            onInteractionEnd: (_) =>
+                c.arbiter.onInteractionEnd(transform: _zoomCtrl.value),
+            child: PageView.builder(
+              controller: _horizontalPager,
+              // ★ 缩放中禁止翻页，否则缩放拖拽会被误判成翻页
+              physics: c.arbiter.lockOuterScroll
+                  ? const NeverScrollableScrollPhysics()
+                  : const PageScrollPhysics(),
+              itemCount: pages.length,
+              onPageChanged: c.updatePageIndex,
+              itemBuilder: (context, i) {
+                final page = pages[i];
+                return RepaintBoundary(
+                  child: page.isText
+                      ? TextPageView(page: page, settings: settings)
+                      : PageImage(
+                          page: page,
+                          resolver: c.resolver,
+                          // 翻页模式：宽度撑满一屏；
+                          //   图片高度未超屏 → 自动居中（用户要求"居中显示"）
+                          //   图片高度超屏   → 顶部对齐，可由 InteractiveViewer 平移
+                          layoutMode: PageLayoutMode.fitViewport,
+                          onDimensionResolved: (dim) =>
+                              _onDimensionResolved(c, page.id, dim),
+                        ),
+                );
+              },
             ),
-            imageSize: MediaQuery.sizeOf(context),
-            viewSize: MediaQuery.sizeOf(context),
-          ),
-          onInteractionEnd: (d) => c.arbiter.onScaleEnd(
-            ScaleEndDetails(velocity: d.velocity, pointerCount: d.pointerCount),
-          ),
-          child: PageView.builder(
-            controller: _horizontalPager,
-            // ★ 缩放中禁止翻页，否则缩放拖拽会被误判成翻页
-            physics: c.arbiter.lockOuterScroll
-                ? const NeverScrollableScrollPhysics()
-                : const PageScrollPhysics(),
-            itemCount: pages.length,
-            onPageChanged: c.updatePageIndex,
-            itemBuilder: (context, i) {
-              final page = pages[i];
-              return RepaintBoundary(
-                child: page.isText
-                    ? TextPageView(page: page, settings: settings)
-                    : PageImage(
-                        page: page,
-                        resolver: c.resolver,
-                        // 翻页模式：宽度撑满一屏；
-                        //   图片高度未超屏 → 自动居中（用户要求"居中显示"）
-                        //   图片高度超屏   → 顶部对齐，可由 InteractiveViewer 平移
-                        layoutMode: PageLayoutMode.fitViewport,
-                        onDimensionResolved: (dim) =>
-                            _onDimensionResolved(c, page.id, dim),
-                      ),
-              );
-            },
-          ),
-        );
-      },
+          );
+        },
+      ),
     );
   }
 }
@@ -563,6 +616,7 @@ class _ReaderErrorScreen extends StatelessWidget {
 // ---------------------------------------------------------------------------
 class _ReaderMenuOverlay extends StatelessWidget {
   const _ReaderMenuOverlay({
+    required this.visible,
     required this.controller,
     required this.document,
     required this.settings,
@@ -573,6 +627,9 @@ class _ReaderMenuOverlay extends StatelessWidget {
     this.bookId,
     this.store,
   });
+
+  /// 菜单是否可见。浮层常驻在树上，用动画进出（旧版条件插入，瞬变无过渡）
+  final bool visible;
 
   final ReaderController controller;
   final Document document;
@@ -597,116 +654,170 @@ class _ReaderMenuOverlay extends StatelessWidget {
     //   完全做不到。现在改成 IgnorePointer，点击/拖动照常落在阅读区上，
     //   关菜单交给 handleSingleTap 判断（中间区关，两侧区翻页）。
     return Positioned.fill(
-      child: Stack(
-        children: [
-          Positioned.fill(
-            child: IgnorePointer(
-              child: ColoredBox(color: Colors.black.withValues(alpha: 0.18)),
+      // 菜单隐藏时整体不接收手势：点击穿透到阅读区（遮罩本身不拦截）
+      child: IgnorePointer(
+        ignoring: !visible,
+        child: Stack(
+          children: [
+            Positioned.fill(
+              child: AnimatedOpacity(
+                opacity: visible ? 1.0 : 0.0,
+                duration: const Duration(milliseconds: 180),
+                child: IgnorePointer(
+                  child:
+                      ColoredBox(color: Colors.black.withValues(alpha: 0.18)),
+                ),
+              ),
             ),
-          ),
-          SafeArea(
-            child: Column(
-              children: [
-                // —— 顶部栏 ——
-                Container(
-                  color: Colors.black.withValues(alpha: 0.86),
-                  padding: const EdgeInsets.symmetric(horizontal: 4, vertical: 4),
-                  child: Row(
-                    children: [
-                      IconButton(
-                        icon: const Icon(Icons.arrow_back, color: Colors.white),
-                        onPressed: () => Navigator.of(context).maybePop(),
-                      ),
-                      Expanded(
-                        child: Column(
-                          crossAxisAlignment: CrossAxisAlignment.start,
+            SafeArea(
+              child: Column(
+                children: [
+                  // —— 顶部栏 ——（显隐带滑动+淡入过渡，替代旧版瞬变）
+                  AnimatedSlide(
+                    offset: visible ? Offset.zero : const Offset(0, -1),
+                    duration: const Duration(milliseconds: 200),
+                    curve: Curves.easeOutCubic,
+                    child: AnimatedOpacity(
+                      opacity: visible ? 1.0 : 0.0,
+                      duration: const Duration(milliseconds: 180),
+                      child: Container(
+                        color: Colors.black.withValues(alpha: 0.86),
+                        padding: const EdgeInsets.symmetric(
+                            horizontal: 4, vertical: 4),
+                        child: Row(
                           children: [
-                            Text(
-                              document.title,
-                              maxLines: 1,
-                              overflow: TextOverflow.ellipsis,
-                              style: const TextStyle(
-                                  color: Colors.white,
-                                  fontSize: 15,
-                                  fontWeight: FontWeight.w600),
+                            IconButton(
+                              icon: const Icon(Icons.arrow_back,
+                                  color: Colors.white),
+                              onPressed: () => Navigator.of(context).maybePop(),
                             ),
-                            AnimatedBuilder(
-                              animation: controller.progressLabel,
-                              builder: (ctx, _) => Text(
-                                controller.progressLabel.value,
-                                style: const TextStyle(
-                                    color: Colors.white60, fontSize: 12),
+                            Expanded(
+                              child: Column(
+                                crossAxisAlignment: CrossAxisAlignment.start,
+                                children: [
+                                  Text(
+                                    document.title,
+                                    maxLines: 1,
+                                    overflow: TextOverflow.ellipsis,
+                                    style: const TextStyle(
+                                        color: Colors.white,
+                                        fontSize: 15,
+                                        fontWeight: FontWeight.w600),
+                                  ),
+                                  AnimatedBuilder(
+                                    animation: controller.progressLabel,
+                                    builder: (ctx, _) => Text(
+                                      controller.progressLabel.value,
+                                      style: const TextStyle(
+                                          color: Colors.white60, fontSize: 12),
+                                    ),
+                                  ),
+                                ],
                               ),
+                            ),
+                            IconButton(
+                              tooltip: '阅读设置',
+                              icon: const Icon(Icons.tune, color: Colors.white),
+                              onPressed: () {
+                                onClose();
+                                showSettingsSheet(
+                                  context: context,
+                                  settings: settings,
+                                  onChanged: onSettingsChanged,
+                                  onModeChanged: onModeChanged,
+                                  document: document,
+                                  controller: controller,
+                                  extraction: extraction,
+                                  bookId: bookId,
+                                  store: store,
+                                );
+                              },
                             ),
                           ],
                         ),
                       ),
-                      IconButton(
-                        tooltip: '阅读设置',
-                        icon: const Icon(Icons.tune, color: Colors.white),
-                        onPressed: () {
-                          onClose();
-                          showSettingsSheet(
-                            context: context,
-                            settings: settings,
-                            onChanged: onSettingsChanged,
-                            onModeChanged: onModeChanged,
-                            document: document,
-                            controller: controller,
-                            extraction: extraction,
-                            bookId: bookId,
-                            store: store,
-                          );
-                        },
-                      ),
-                    ],
+                    ),
                   ),
-                ),
 
-                const Spacer(),
+                  const Spacer(),
 
-                // —— 底部：模式快捷切换 ——
-                Container(
-                  color: Colors.black.withValues(alpha: 0.82),
-                  padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
-                  child: Row(
-                    mainAxisAlignment: MainAxisAlignment.spaceEvenly,
-                    children: ReadingMode.values.map((mode) {
-                      final selected = controller.mode == mode;
-                      return Expanded(
-                        child: InkWell(
-                          onTap: () => onModeChanged(mode),
-                          borderRadius: BorderRadius.circular(10),
-                          child: Padding(
-                            padding: const EdgeInsets.symmetric(vertical: 8),
-                            child: Column(
-                              mainAxisSize: MainAxisSize.min,
-                              children: [
-                                Icon(
-                                  mode.icon,
-                                  color: selected ? Colors.white : Colors.white38,
-                                ),
-                                const SizedBox(height: 4),
-                                Text(
-                                  mode.label,
-                                  style: TextStyle(
-                                    color: selected ? Colors.white : Colors.white38,
-                                    fontSize: 12,
+                  // —— 底部：模式快捷切换 ——（显隐带滑动+淡入过渡）
+                  AnimatedSlide(
+                    offset: visible ? Offset.zero : const Offset(0, 1),
+                    duration: const Duration(milliseconds: 200),
+                    curve: Curves.easeOutCubic,
+                    child: AnimatedOpacity(
+                      opacity: visible ? 1.0 : 0.0,
+                      duration: const Duration(milliseconds: 180),
+                      child: Container(
+                        color: Colors.black.withValues(alpha: 0.82),
+                        padding: const EdgeInsets.symmetric(
+                            horizontal: 12, vertical: 10),
+                        child: Row(
+                          mainAxisAlignment: MainAxisAlignment.spaceEvenly,
+                          children: ReadingMode.values.map((mode) {
+                            final selected = controller.mode == mode;
+                            return Expanded(
+                              child: InkWell(
+                                onTap: () => onModeChanged(mode),
+                                borderRadius: BorderRadius.circular(10),
+                                child: Padding(
+                                  padding:
+                                      const EdgeInsets.symmetric(vertical: 8),
+                                  child: Column(
+                                    mainAxisSize: MainAxisSize.min,
+                                    children: [
+                                      Icon(
+                                        mode.icon,
+                                        color: selected
+                                            ? Colors.white
+                                            : Colors.white38,
+                                      ),
+                                      const SizedBox(height: 4),
+                                      Text(
+                                        mode.label,
+                                        style: TextStyle(
+                                          color: selected
+                                              ? Colors.white
+                                              : Colors.white38,
+                                          fontSize: 12,
+                                        ),
+                                      ),
+                                    ],
                                   ),
                                 ),
-                              ],
-                            ),
-                          ),
+                              ),
+                            );
+                          }).toList(),
                         ),
-                      );
-                    }).toList(),
+                      ),
+                    ),
                   ),
-                ),
-              ],
+                ],
+              ),
             ),
-          ),
-        ],
+          ],
+        ),
       ),
     );
   }
+}
+
+/// 双击缩放宿主：把控制器算出的目标矩阵接到 TransformationController。
+///
+/// 旧实现双击只改仲裁器状态、从不碰真实变换 —— 画面不放大却锁住翻页。
+/// 现在矩阵是唯一事实源：仲裁器、双击动画、跳转复位都读写同一份。
+class _ZoomHost implements ReaderZoomHost {
+  _ZoomHost(this._state);
+
+  final _ReaderScreenState _state;
+
+  @override
+  Matrix4 get matrix => _state._zoomCtrl.value;
+
+  @override
+  void animateTo(Matrix4 target) => _state._animateZoomTo(target);
+
+  @override
+  void jumpTo(Matrix4 target) => _state._zoomCtrl.value = target;
 }

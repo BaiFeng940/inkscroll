@@ -11,7 +11,6 @@ library;
 // ignore_for_file: avoid_print
 
 import 'dart:io';
-import 'dart:typed_data';
 
 import 'package:inkscroll/core/errors.dart';
 import 'package:inkscroll/data/archive/zip_archive_source.dart';

@@ -3,7 +3,6 @@
 /// 阅读器要同时限制张数与字节数：一张 Webtoon 长条可能比 100 张普通页还大。
 library;
 
-
 class LruCache<K, V> {
   LruCache({required this.maxEntries, required this.maxBytes, this.sizeOf});
 

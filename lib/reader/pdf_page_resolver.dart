@@ -10,6 +10,7 @@
 ///    （滚动时很常见），如果不去重就会渲染两次、浪费一倍 CPU。
 library;
 
+import 'dart:async';
 import 'dart:typed_data';
 
 import 'package:flutter/foundation.dart';
@@ -33,10 +34,54 @@ class PdfPageResolver implements PageByteResolver {
   final int renderWidth;
 
   /// 已渲染页的字节缓存（页号 -> PNG）
-  final PageImageCache _cache = PageImageCache(maxEntries: 12, maxBytes: 96 << 20);
+  final PageImageCache _cache =
+      PageImageCache(maxEntries: 12, maxBytes: 96 << 20);
 
   /// 正在进行中的渲染，用于合并同一页的并发请求
   final Map<int, Future<Uint8List>> _inflight = {};
+
+  /// 阅读顺序里的 PDF 页号（-1 = 非 PDF 页）。
+  /// 由 buildDocument 在装配时注入 —— 只有它知道 Document 的阅读顺序。
+  List<int> _pageOrder = const [];
+
+  /// 注入阅读顺序（用于邻页预取）。
+  void attachPageOrder(List<PageNode> order) {
+    _pageOrder = [
+      for (final page in order)
+        switch (page.content) {
+          ImageContent(:final ref) when ref is PdfPageRef => ref.pageIndex,
+          _ => -1,
+        }
+    ];
+  }
+
+  /// 预取当前页前后各 [radius] 页。
+  ///
+  /// PDF 每页都要原生渲染（一页 100~300ms），不预取的话翻页节奏
+  /// 明显比图片慢。预取失败静默 —— 阅读主路径会自己再渲染。
+  void prefetchAroundPage(PageNode page, {int radius = 2}) {
+    final content = page.content;
+    if (content is! ImageContent || content.ref is! PdfPageRef) return;
+    final idx = (content.ref as PdfPageRef).pageIndex;
+    final pos = _pageOrder.indexOf(idx);
+    if (pos < 0) return;
+    for (var off = -radius; off <= radius; off++) {
+      if (off == 0) continue;
+      final p = pos + off;
+      if (p < 0 || p >= _pageOrder.length) continue;
+      final target = _pageOrder[p];
+      if (target < 0) continue;
+      if (_cache.get('$target') != null) continue;
+      if (_inflight.containsKey(target)) continue;
+      final fut = _render(target);
+      _inflight[target] = fut;
+      // 预取失败静默吞掉（不污染 _inflight 里给主路径用的原 Future），
+      // 但 whenComplete 挂在吞错后的链上，清理照样执行。
+      unawaited(fut
+          .catchError((_) => Uint8List(0))
+          .whenComplete(() => _inflight.remove(target)));
+    }
+  }
 
   @override
   Future<Uint8List> imageBytes(PageNode page) async {

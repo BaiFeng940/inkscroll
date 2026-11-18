@@ -281,10 +281,13 @@ class Document {
 
   /// 按阅读顺序展开的页列表（虚拟长页的顺序就是它）。
   ///
-  /// 不用 late final 缓存：因为 [PageNode.aspectRatio] 可能在真实解码后被回填
-  /// （见 ReaderController.backfillAspect），缓存住旧快照会导致度量算错。
-  /// 每次重新组装一个 List 引用的成本可以忽略（不是深拷贝）。
+  /// ★ 带脏标记的缓存。滚动/翻页的每一帧都会读它，旧实现每次全量重组，
+  ///   5000 页 × 120Hz ≈ 每秒 60 万次列表项处理 —— 这是滚动卡顿的主因之一。
+  ///   唯一的变异路径是 [applyAspect]（真实解码后回填比例），它会把缓存
+  ///   失效一次；章节与页集合在构建后不变，所以缓存是安全的。
   List<PageNode> get pagesInOrder {
+    final cached = _orderCache;
+    if (cached != null && _orderCacheEpoch == _orderEpoch) return cached;
     final out = <PageNode>[];
     final seen = <String>{};
     for (final c in chapters) {
@@ -297,7 +300,30 @@ class Document {
     for (final p in pages.values) {
       if (seen.add(p.id)) out.add(p);
     }
+    _orderCache = out;
+    _orderCacheEpoch = _orderEpoch;
     return out;
+  }
+
+  int _orderEpoch = 0;
+  int _orderCacheEpoch = -1;
+  List<PageNode>? _orderCache;
+
+  /// 真实解码后回填页面比例 —— 唯一的受控变异入口。
+  ///
+  /// 偏差小于 0.5% 时忽略，避免无意义的抖动与缓存失效。
+  /// 返回是否真的发生了变更。
+  bool applyAspect(String pageId, double aspect) {
+    final page = pages[pageId];
+    if (page == null) return false;
+    if (!aspect.isFinite || aspect <= 0.02 || aspect > 50) return false;
+    final existing = page.aspectRatio;
+    if (existing != null && ((existing - aspect).abs() / aspect) <= 0.005) {
+      return false;
+    }
+    pages[pageId] = page.copyWith(aspectRatio: aspect);
+    _orderEpoch++;
+    return true;
   }
 
   /// pageId -> 阅读顺序下标（构建一次，避免章节查找变成 O(n^2)）
@@ -426,8 +452,7 @@ class PageLayoutMetrics {
   double ratioAt(double y) =>
       totalHeight <= 0 ? 0 : (y / totalHeight).clamp(0.0, 1.0);
 
-  double offsetForRatio(double r) =>
-      (r.clamp(0.0, 1.0)) * totalHeight;
+  double offsetForRatio(double r) => (r.clamp(0.0, 1.0)) * totalHeight;
 
   /// 由"页 + 页内比例"还原像素位置
   double pixelFor(int pageIndex, double ratioInPage) =>

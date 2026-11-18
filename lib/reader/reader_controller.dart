@@ -19,8 +19,24 @@ import '../data/prefs_store.dart';
 import '../ui/reader/gesture_arbiter.dart';
 import 'document.dart';
 import 'page_cache.dart';
+import 'pdf_page_resolver.dart';
 
 enum ReaderStatus { loading, ready, failed }
+
+/// 双击缩放的宿主接口：由阅读器 UI 实现。
+///
+/// 真正的矩阵变换由 InteractiveViewer 的 TransformationController 持有，
+/// 控制器只负责"算出目标矩阵"，不直接持有渲染状态。
+abstract class ReaderZoomHost {
+  /// 当前真实变换矩阵
+  Matrix4 get matrix;
+
+  /// 以动画移动到目标矩阵
+  void animateTo(Matrix4 target);
+
+  /// 立即移动到目标矩阵
+  void jumpTo(Matrix4 target);
+}
 
 class ReaderController extends ChangeNotifier {
   ReaderController({
@@ -60,6 +76,15 @@ class ReaderController extends ChangeNotifier {
   PageLayoutMetrics? metrics;
   ScrollController? verticalScroll;
   PageController? horizontalPager;
+
+  /// 双击缩放宿主（UI 层注入；null = 无法缩放）
+  ReaderZoomHost? zoomHost;
+
+  /// 由 UI 层在视口变化时更新（双击缩放的落点换算需要）
+  Size? lastViewportSize;
+
+  /// 缩放复位时同步复位真实矩阵（UI 层注入）
+  void Function()? onZoomReset;
 
   ReadingProgress _progress = const ReadingProgress();
   ReadingProgress get progress => _progress;
@@ -108,10 +133,6 @@ class ReaderController extends ChangeNotifier {
   // ------------------------------------------------------------------
   // 度量注入
   // ------------------------------------------------------------------
-  void attachMetrics(PageLayoutMetrics m) {
-    metrics = m;
-    _updateProgressNotifier();
-  }
 
   void attachVerticalScroll(ScrollController c) {
     verticalScroll?.removeListener(_onVerticalScroll);
@@ -149,6 +170,7 @@ class ReaderController extends ChangeNotifier {
     );
     _updateProgressNotifier();
     _scheduleSave();
+    _prefetchAround(pageIndex);
   }
 
   /// 模式 ①②：由当前页反推进度
@@ -168,6 +190,26 @@ class ReaderController extends ChangeNotifier {
     );
     _updateProgressNotifier();
     _scheduleSave();
+    _prefetchAround(pageIndex);
+  }
+
+  /// 当前正在阅读的页变了 → 通知 PDF 渲染器预取邻页。
+  ///
+  /// PDF 的"字节"是渲染出来的（一页 100~300ms），不预取的话
+  /// 翻页节奏明显比图片慢。其他 resolver 的预取策略各自处理
+  /// （本地压缩包靠预解压、WebDAV 靠自身邻页循环），不走这里。
+  int _lastPrefetchPage = -1;
+
+  void _prefetchAround(int pageIndex) {
+    if (pageIndex == _lastPrefetchPage) return;
+    _lastPrefetchPage = pageIndex;
+    final r = resolver;
+    if (r is! PdfPageResolver) return;
+    final doc = document;
+    if (doc == null) return;
+    final order = doc.pagesInOrder;
+    if (pageIndex < 0 || pageIndex >= order.length) return;
+    r.prefetchAroundPage(order[pageIndex]);
   }
 
   int? _charOffsetOfPage(int pageIndex) {
@@ -182,6 +224,10 @@ class ReaderController extends ChangeNotifier {
   // ------------------------------------------------------------------
   // 跳转（进度条拖动 / 页码跳转 / 章节跳转）
   // ------------------------------------------------------------------
+  /// 翻页/跳转动画：按设置的档位取时长，关档时一律瞬时跳转。
+  Duration get _animDuration => settings.pageTurnAnim.duration;
+  bool get _animEnabled => settings.pageTurnAnim != PageTurnAnim.off;
+
   /// 跳到归一化百分比。三种模式都支持。
   void jumpToRatio(double r, {bool animate = false}) {
     final doc = document;
@@ -192,9 +238,9 @@ class ReaderController extends ChangeNotifier {
       final c = verticalScroll;
       if (m == null || c == null || !c.hasClients) return;
       final target = m.offsetForRatio(r).clamp(0.0, c.position.maxScrollExtent);
-      if (animate) {
+      if (animate && _animEnabled) {
         c.animateTo(target,
-            duration: const Duration(milliseconds: 220), curve: Curves.easeOutCubic);
+            duration: _animDuration, curve: Curves.easeOutCubic);
       } else {
         c.jumpTo(target);
       }
@@ -203,7 +249,7 @@ class ReaderController extends ChangeNotifier {
       jumpToPage(target, animate: animate);
     }
     // 跳转时重置缩放，避免"跳到新位置但还带着旧缩放"
-    arbiter.resetZoom();
+    _resetZoom();
   }
 
   void jumpToPage(int pageIndex, {bool animate = false}) {
@@ -216,9 +262,8 @@ class ReaderController extends ChangeNotifier {
       final c = verticalScroll;
       if (m != null && c != null && c.hasClients) {
         final y = m.topOf(target).clamp(0.0, c.position.maxScrollExtent);
-        if (animate) {
-          c.animateTo(y,
-              duration: const Duration(milliseconds: 220), curve: Curves.easeOutCubic);
+        if (animate && _animEnabled) {
+          c.animateTo(y, duration: _animDuration, curve: Curves.easeOutCubic);
         } else {
           c.jumpTo(y);
         }
@@ -226,9 +271,9 @@ class ReaderController extends ChangeNotifier {
     } else {
       final p = horizontalPager;
       if (p != null && p.hasClients) {
-        if (animate) {
+        if (animate && _animEnabled) {
           p.animateToPage(target,
-              duration: const Duration(milliseconds: 220), curve: Curves.easeOutCubic);
+              duration: _animDuration, curve: Curves.easeOutCubic);
         } else {
           p.jumpToPage(target);
         }
@@ -269,9 +314,9 @@ class ReaderController extends ChangeNotifier {
     final maxExtent = c.position.maxScrollExtent;
     final targetOffset = (targetRatio * maxExtent).clamp(0.0, maxExtent);
 
-    if (animate && attemptsLeft == 3) {
+    if (animate && _animEnabled && attemptsLeft == 3) {
       c.animateTo(targetOffset,
-          duration: const Duration(milliseconds: 220), curve: Curves.easeOutCubic);
+          duration: _animDuration, curve: Curves.easeOutCubic);
     } else {
       c.jumpTo(targetOffset);
     }
@@ -296,7 +341,9 @@ class ReaderController extends ChangeNotifier {
 
   void goToChapter(int chapterIndex) {
     final doc = document;
-    if (doc == null || chapterIndex < 0 || chapterIndex >= doc.chapterCount) return;
+    if (doc == null || chapterIndex < 0 || chapterIndex >= doc.chapterCount) {
+      return;
+    }
     final chapter = doc.chapters[chapterIndex];
     if (chapter.pageIds.isEmpty) return;
     final pageIndex = doc.indexOfPage(chapter.pageIds.first);
@@ -380,13 +427,17 @@ class ReaderController extends ChangeNotifier {
     final anchorRatioInPage = _progress.ratioInPage;
 
     mode = newMode;
-    arbiter.resetZoom();
+    _resetZoom();
     _safeNotify();
 
     // 3) 等新的布局建立后再还原位置
     WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (_disposed) return; // 快速"切模式即退出"时回调不能触碰已释放的资源
       final restored = _perModeProgress[newMode] ??
-          _progress.copyWith(mode: newMode, pageIndex: anchorPage, ratioInPage: anchorRatioInPage);
+          _progress.copyWith(
+              mode: newMode,
+              pageIndex: anchorPage,
+              ratioInPage: anchorRatioInPage);
 
       if (newMode.isVertical) {
         final m = metrics;
@@ -435,8 +486,9 @@ class ReaderController extends ChangeNotifier {
   DateTime? _lastTapAt;
   Offset? _lastTapPos;
 
-  /// 判断两次点击是否构成"双击"的距离阈值（逻辑像素）
-  static const double _doubleTapSlop = 48;
+  /// 判断两次点击是否构成"双击"的时序与落点阈值统一走 [ReaderTiming]
+  /// （旧实现延迟 220ms、窗口 300ms 两套口径打架，220~300ms 区间的
+  /// 双击会把菜单弹出来又立刻关掉，缩放在该区间永远不可达）。
 
   /// 必须经过 [TapArbiter] 延迟，否则双击会被先判成两次单击。
   void handleSingleTap(Offset localPosition, Size viewportSize) {
@@ -474,8 +526,10 @@ class ReaderController extends ChangeNotifier {
     final now = DateTime.now();
     final gap = _lastTapAt == null ? null : now.difference(_lastTapAt!);
     final nearSame = _lastTapPos != null &&
-        (localPosition - _lastTapPos!).distance <= _doubleTapSlop;
-    final isDoubleTap = gap != null && gap.inMilliseconds < 300 && nearSame;
+        (localPosition - _lastTapPos!).distance <= ReaderTiming.doubleTapSlop;
+    final isDoubleTap = gap != null &&
+        gap.inMilliseconds < ReaderTiming.doubleTapWindowMs &&
+        nearSame;
 
     if (isDoubleTap) {
       _lastTapAt = null;
@@ -507,12 +561,47 @@ class ReaderController extends ChangeNotifier {
   void handleDoubleTap(Offset localPosition) {
     tapArbiter.cancelPendingTap();
     arbiter.rememberDoubleTapPosition(localPosition);
-    arbiter.toggleZoom();
+
+    // 垂直长页模式没有缩放交互：整页无缝拼接，双击缩放只会锁住滚动
+    //（旧实现在这里会把锁打开却没人消费，表现为"随手双点中间就滑不动了"）。
+    final host = zoomHost;
+    if (host == null || mode.isVertical) return;
+
+    final current = host.matrix.getMaxScaleOnAxis();
+    if (current > 1.05) {
+      // 已放大 → 动画复位
+      arbiter.noteExternalZoom(1.0);
+      host.animateTo(Matrix4.identity());
+      return;
+    }
+
+    // 放大到 2.5x，以落点为中心（旧实现只记了落点却从没用上）。
+    // 平移钳制在真实边界内（与 InteractiveViewer 的 boundaryMargin 一致）。
+    final v = lastViewportSize;
+    if (v == null || v.width <= 0 || v.height <= 0) return;
+    const target = 2.5;
+    final fx = localPosition.dx.clamp(0.0, v.width);
+    final fy = localPosition.dy.clamp(0.0, v.height);
+    final tx = ((fx * (1 - target)).clamp(v.width * (1 - target), 0.0)).toDouble();
+    final ty = ((fy * (1 - target)).clamp(v.height * (1 - target), 0.0)).toDouble();
+    final m = Matrix4.identity()
+      ..translateByDouble(tx, ty, 0, 1)
+      ..scaleByDouble(target, target, 1, 1);
+    arbiter.noteExternalZoom(target);
+    host.animateTo(m);
+  }
+
+  /// 复位缩放：仲裁器状态 + 真实矩阵一起归零。
+  void _resetZoom() {
+    arbiter.resetZoom();
+    onZoomReset?.call();
   }
 
   void _onArbiterChanged() {
+    // ★ 缩放手势的高频通知不再扩散成整树重建（旧实现每帧 notifyListeners，
+    //   捏合期间每帧重建整棵 Scaffold —— 这是缩放掉帧的主因）。
+    // zoom 值静默写入进度，随后由页码变化或退出时的强制保存一并落盘。
     _progress = _progress.copyWith(zoom: arbiter.scale);
-    _safeNotify();
   }
 
   // ------------------------------------------------------------------
@@ -541,16 +630,19 @@ class ReaderController extends ChangeNotifier {
     if (page == null) return false;
 
     final newAspect = dim.aspectRatio;
-    if (!newAspect.isFinite || newAspect <= 0.02 || newAspect > 50) return false;
+    if (!newAspect.isFinite || newAspect <= 0.02 || newAspect > 50) {
+      return false;
+    }
 
     // 偏差小于 0.5% 就不动，避免无意义的抖动
     final existing = _aspectOverrides[pageId] ?? page.aspectRatio;
-    if (existing != null && ((existing - newAspect).abs() / newAspect) <= 0.005) {
+    if (existing != null &&
+        ((existing - newAspect).abs() / newAspect) <= 0.005) {
       return false;
     }
 
     _aspectOverrides[pageId] = newAspect;
-    doc.pages[pageId] = page.copyWith(aspectRatio: newAspect);
+    doc.applyAspect(pageId, newAspect);
     return true;
   }
 
@@ -589,7 +681,8 @@ class ReaderController extends ChangeNotifier {
     final doc = document;
     final w = _pendingViewportWidth;
     if (doc == null || w == null || w <= 0) return;
-    metrics = PageLayoutMetrics.build(pages: doc.pagesInOrder, viewportWidth: w);
+    metrics =
+        PageLayoutMetrics.build(pages: doc.pagesInOrder, viewportWidth: w);
     _updateProgressNotifier();
   }
 

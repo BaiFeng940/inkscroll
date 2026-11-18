@@ -2,16 +2,19 @@ package com.inkscroll.reader
 
 import android.content.Intent
 import android.os.Bundle
+import android.view.WindowManager
 import io.flutter.embedding.android.FlutterActivity
 import io.flutter.embedding.android.FlutterView
 import io.flutter.embedding.engine.FlutterEngine
 import io.flutter.embedding.engine.renderer.FlutterUiDisplayListener
+import io.flutter.plugin.common.MethodChannel
 
 class MainActivity : FlutterActivity() {
 
     private var safPlugin: SafFolderPlugin? = null
     private var refreshRate: RefreshRateController? = null
     private var pdfPlugin: PdfPlugin? = null
+    private var displayChannel: MethodChannel? = null
     private var surfaceRateApplied = false
 
     override fun configureFlutterEngine(flutterEngine: FlutterEngine) {
@@ -19,6 +22,33 @@ class MainActivity : FlutterActivity() {
         safPlugin = SafFolderPlugin(this, flutterEngine.dartExecutor.binaryMessenger)
         refreshRate = RefreshRateController(this)
         pdfPlugin = PdfPlugin(flutterEngine.dartExecutor.binaryMessenger)
+        displayChannel = MethodChannel(flutterEngine.dartExecutor.binaryMessenger, "inkscroll/display").also { ch ->
+            ch.setMethodCallHandler { call, result ->
+                when (call.method) {
+                    // 屏幕常亮（旧版本设置项只存值无调用点，从不生效）。
+                    // FLAG_KEEP_SCREEN_ON 只在本窗口生效，退出阅读器由
+                    // Dart 侧调 setKeepScreenOn(false) 恢复系统行为。
+                    "setKeepScreenOn" -> {
+                        val on = call.argument<Boolean>("on") ?: true
+                        runOnUiThread {
+                            if (on) {
+                                window.addFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON)
+                            } else {
+                                window.clearFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON)
+                            }
+                            result.success(true)
+                        }
+                    }
+                    // 高刷档位：standard120 / max / system
+                    //（旧实现写死 ≤120Hz，144Hz 设备被压到 60Hz）
+                    "setRefreshMode" -> {
+                        refreshRate?.setTarget(call.argument<String>("mode") ?: "standard120")
+                        result.success(true)
+                    }
+                    else -> result.notImplemented()
+                }
+            }
+        }
     }
 
     override fun onCreate(savedInstanceState: Bundle?) {
@@ -70,6 +100,8 @@ class MainActivity : FlutterActivity() {
     }
 
     override fun onDestroy() {
+        displayChannel?.setMethodCallHandler(null)
+        displayChannel = null
         pdfPlugin?.dispose()
         pdfPlugin = null
         safPlugin?.dispose()

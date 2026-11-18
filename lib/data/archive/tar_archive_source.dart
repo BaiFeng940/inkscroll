@@ -137,7 +137,8 @@ class TarArchiveSource implements ArchiveSource {
     return _cString(b, 0, b.length);
   }
 
-  static int _paddedSize(int size) => ((size + _blockSize - 1) ~/ _blockSize) * _blockSize;
+  static int _paddedSize(int size) =>
+      ((size + _blockSize - 1) ~/ _blockSize) * _blockSize;
 
   static bool _isAllZero(Uint8List b) {
     for (final v in b) {

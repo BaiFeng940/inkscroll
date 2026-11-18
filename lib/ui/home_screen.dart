@@ -29,7 +29,8 @@ class HomeScreen extends StatefulWidget {
   State<HomeScreen> createState() => _HomeScreenState();
 }
 
-class _HomeScreenState extends State<HomeScreen> with SingleTickerProviderStateMixin {
+class _HomeScreenState extends State<HomeScreen>
+    with SingleTickerProviderStateMixin {
   late final TabController _tabs = TabController(length: 2, vsync: this);
   final _searchController = TextEditingController();
   String _query = '';
@@ -80,8 +81,8 @@ class _HomeScreenState extends State<HomeScreen> with SingleTickerProviderStateM
       if (!mounted) return;
       final r = await app.checkUpdate();
       if (!mounted || !r.hasUpdate) return;
-      await showUpdateDialog(context, result: r, manual: false,
-          onSkip: app.skipVersion);
+      await showUpdateDialog(context,
+          result: r, manual: false, onSkip: app.skipVersion);
     });
   }
 
@@ -119,13 +120,15 @@ class _HomeScreenState extends State<HomeScreen> with SingleTickerProviderStateM
               child: Align(
                 alignment: Alignment.centerLeft,
                 child: Text('导入内容',
-                    style: TextStyle(fontSize: 17, fontWeight: FontWeight.w600)),
+                    style:
+                        TextStyle(fontSize: 17, fontWeight: FontWeight.w600)),
               ),
             ),
             ..._ImportChoice.values.map((c) => ListTile(
                   leading: Icon(c.icon),
                   title: Text(c.title),
-                  subtitle: Text(c.subtitle, style: const TextStyle(fontSize: 12)),
+                  subtitle:
+                      Text(c.subtitle, style: const TextStyle(fontSize: 12)),
                   onTap: () => Navigator.of(ctx).pop(c),
                 )),
             const SizedBox(height: 8),
@@ -163,14 +166,15 @@ class _HomeScreenState extends State<HomeScreen> with SingleTickerProviderStateM
           allowMultiple: true,
         );
         final picked =
-            res?.files.map((f) => f.path).whereType<String>().toList() ?? const [];
+            res?.files.map((f) => f.path).whereType<String>().toList() ??
+                const [];
         if (picked.isEmpty) return;
 
         // ★ 先把顺序给用户看一眼 —— 默认已按文件名自然排序，
         //   用户可以上下移动微调。这样"排序不对"就不再需要猜。
         if (!mounted) return;
-        final sorted = [...picked]..sort(
-            (a, b) => compareByOriginalName(p.basename(a), p.basename(b)));
+        final sorted = [...picked]
+          ..sort((a, b) => compareByOriginalName(p.basename(a), p.basename(b)));
         final adjusted = await showImageOrderSheet(
           context: context,
           paths: sorted,
@@ -192,7 +196,6 @@ class _HomeScreenState extends State<HomeScreen> with SingleTickerProviderStateM
           paths: adjusted,
           manuallyOrdered: !unchanged,
         );
-
 
       case _ImportChoice.url:
         final url = await _askForText(
@@ -305,6 +308,25 @@ class _HomeScreenState extends State<HomeScreen> with SingleTickerProviderStateM
     }
   }
 
+  /// 打开阅读器/准备页用「淡入 + 轻微放大」转场。
+  ///
+  /// 全屏黑底的阅读器用默认平台滑入转场观感生硬；封面 Hero 转场
+  /// 需要阅读器侧配合，留待后续版本。
+  Route<T> _readerRoute<T>(Widget page) => PageRouteBuilder<T>(
+        transitionDuration: const Duration(milliseconds: 240),
+        reverseTransitionDuration: const Duration(milliseconds: 180),
+        pageBuilder: (_, __, ___) => page,
+        transitionsBuilder: (_, animation, __, child) => FadeTransition(
+          opacity: CurvedAnimation(parent: animation, curve: Curves.easeOut),
+          child: ScaleTransition(
+            scale: Tween<double>(begin: 0.97, end: 1.0).animate(
+              CurvedAnimation(parent: animation, curve: Curves.easeOutCubic),
+            ),
+            child: child,
+          ),
+        ),
+      );
+
   Future<void> _openBook(BookMeta book) async {
     final app = context.read<AppState>();
 
@@ -315,8 +337,8 @@ class _HomeScreenState extends State<HomeScreen> with SingleTickerProviderStateM
     // 预先解压之后每页都是直接文件 I/O（几毫秒），代价只是第一次等一次。
     if (app.needsPrepare(book) && mounted) {
       final proceed = await Navigator.of(context).push<bool>(
-        MaterialPageRoute(
-          builder: (_) => PrepareScreen(
+        _readerRoute<bool>(
+          PrepareScreen(
             title: book.title,
             run: (onProgress) => app.prepareBook(book, onProgress: onProgress),
           ),
@@ -331,8 +353,8 @@ class _HomeScreenState extends State<HomeScreen> with SingleTickerProviderStateM
 
     if (!mounted) return;
     await Navigator.of(context).push(
-      MaterialPageRoute(
-        builder: (_) => ReaderScreen(
+      _readerRoute(
+        ReaderScreen(
           book: book,
           settings: app.settings,
           prefs: app.prefsForReader,
@@ -417,8 +439,7 @@ class _HomeScreenState extends State<HomeScreen> with SingleTickerProviderStateM
     ScaffoldMessenger.of(context)
       ..hideCurrentSnackBar()
       ..showSnackBar(SnackBar(
-        content:
-            Text(value ? '已收藏 ${ids.length} 本' : '已取消收藏 ${ids.length} 本'),
+        content: Text(value ? '已收藏 ${ids.length} 本' : '已取消收藏 ${ids.length} 本'),
         behavior: SnackBarBehavior.floating,
       ));
   }
@@ -490,53 +511,54 @@ class _HomeScreenState extends State<HomeScreen> with SingleTickerProviderStateM
             _buildSelectionBar(app, topPad)
           else
             Container(
-            padding: EdgeInsets.fromLTRB(12, topPad + 8, 8, 6),
-            child: Row(
-              children: [
-                Expanded(
-                  child: TextField(
-                    controller: _searchController,
-                    textInputAction: TextInputAction.search,
-                    decoration: InputDecoration(
-                      prefixIcon: const Icon(Icons.search, size: 20),
-                      hintText: _tabs.index == 0 ? '搜索本地库' : '搜索在线库',
-                      isDense: true,
-                      filled: true,
-                      fillColor: theme.colorScheme.surfaceContainerHighest
-                          .withValues(alpha: 0.5),
-                      contentPadding:
-                          const EdgeInsets.symmetric(vertical: 10, horizontal: 8),
-                      border: OutlineInputBorder(
-                        borderRadius: BorderRadius.circular(12),
-                        borderSide: BorderSide.none,
+              padding: EdgeInsets.fromLTRB(12, topPad + 8, 8, 6),
+              child: Row(
+                children: [
+                  Expanded(
+                    child: TextField(
+                      controller: _searchController,
+                      textInputAction: TextInputAction.search,
+                      decoration: InputDecoration(
+                        prefixIcon: const Icon(Icons.search, size: 20),
+                        hintText: _tabs.index == 0 ? '搜索本地库' : '搜索在线库',
+                        isDense: true,
+                        filled: true,
+                        fillColor: theme.colorScheme.surfaceContainerHighest
+                            .withValues(alpha: 0.5),
+                        contentPadding: const EdgeInsets.symmetric(
+                            vertical: 10, horizontal: 8),
+                        border: OutlineInputBorder(
+                          borderRadius: BorderRadius.circular(12),
+                          borderSide: BorderSide.none,
+                        ),
+                        suffixIcon: _query.isEmpty
+                            ? null
+                            : IconButton(
+                                icon: const Icon(Icons.clear, size: 18),
+                                onPressed: () {
+                                  _searchController.clear();
+                                  setState(() => _query = '');
+                                },
+                              ),
                       ),
-                      suffixIcon: _query.isEmpty
-                          ? null
-                          : IconButton(
-                              icon: const Icon(Icons.clear, size: 18),
-                              onPressed: () {
-                                _searchController.clear();
-                                setState(() => _query = '');
-                              },
-                            ),
+                      onChanged: (v) => setState(() => _query = v),
                     ),
-                    onChanged: (v) => setState(() => _query = v),
                   ),
-                ),
-                const SizedBox(width: 4),
-                IconButton(
-                  tooltip: '设置',
-                  icon: const Icon(Icons.settings_outlined),
-                  onPressed: () async {
-                    await Navigator.of(context).push(
-                      MaterialPageRoute(builder: (_) => const SettingsScreen()),
-                    );
-                    if (mounted) await app.refreshBooks();
-                  },
-                ),
-              ],
+                  const SizedBox(width: 4),
+                  IconButton(
+                    tooltip: '设置',
+                    icon: const Icon(Icons.settings_outlined),
+                    onPressed: () async {
+                      await Navigator.of(context).push(
+                        MaterialPageRoute(
+                            builder: (_) => const SettingsScreen()),
+                      );
+                      if (mounted) await app.refreshBooks();
+                    },
+                  ),
+                ],
+              ),
             ),
-          ),
 
           // ── Tab：本地库 / 在线库 ──
           TabBar(
@@ -605,7 +627,6 @@ class _HomeScreenState extends State<HomeScreen> with SingleTickerProviderStateM
     );
   }
 
-
   Future<void> _confirmDelete(BookMeta book) async {
     final app = context.read<AppState>();
     final ok = await showDialog<bool>(
@@ -616,9 +637,11 @@ class _HomeScreenState extends State<HomeScreen> with SingleTickerProviderStateM
             '本地导入的文件也会一并删除，无法恢复。'),
         actions: [
           TextButton(
-              onPressed: () => Navigator.of(ctx).pop(false), child: const Text('取消')),
+              onPressed: () => Navigator.of(ctx).pop(false),
+              child: const Text('取消')),
           FilledButton(
-              onPressed: () => Navigator.of(ctx).pop(true), child: const Text('删除')),
+              onPressed: () => Navigator.of(ctx).pop(true),
+              child: const Text('删除')),
         ],
       ),
     );
@@ -643,7 +666,9 @@ class _HomeScreenState extends State<HomeScreen> with SingleTickerProviderStateM
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
             if (message != null) ...[
-              Text(message, style: const TextStyle(color: Colors.redAccent, fontSize: 13)),
+              Text(message,
+                  style:
+                      const TextStyle(color: Colors.redAccent, fontSize: 13)),
               const SizedBox(height: 10),
             ],
             TextField(
@@ -656,7 +681,8 @@ class _HomeScreenState extends State<HomeScreen> with SingleTickerProviderStateM
         ),
         actions: [
           TextButton(
-              onPressed: () => Navigator.of(ctx).pop(), child: const Text('取消')),
+              onPressed: () => Navigator.of(ctx).pop(),
+              child: const Text('取消')),
           FilledButton(
               onPressed: () => Navigator.of(ctx).pop(controller.text),
               child: const Text('确定')),
@@ -737,7 +763,9 @@ class _BookGrid extends StatelessWidget {
             mainAxisSize: MainAxisSize.min,
             children: [
               Icon(
-                emptyAction != null ? Icons.dns_outlined : Icons.collections_bookmark_outlined,
+                emptyAction != null
+                    ? Icons.dns_outlined
+                    : Icons.collections_bookmark_outlined,
                 size: 40,
                 color: Colors.grey.withValues(alpha: 0.6),
               ),
@@ -834,8 +862,7 @@ class _BookCard extends StatelessWidget {
       // 选择模式下的点击行为必须变：否则用户点一下就跳进阅读器，
       // 批量选择等于做不了。
       onTap: () => selecting ? onToggleSelect(book) : onOpen(book),
-      onLongPress: () =>
-          selecting ? onToggleSelect(book) : onStartSelect(book),
+      onLongPress: () => selecting ? onToggleSelect(book) : onStartSelect(book),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
@@ -954,8 +981,10 @@ class _BookCard extends StatelessWidget {
               onTap: () => Navigator.of(ctx).pop('info'),
             ),
             ListTile(
-              leading: const Icon(Icons.delete_outline, color: Colors.redAccent),
-              title: const Text('删除', style: TextStyle(color: Colors.redAccent)),
+              leading:
+                  const Icon(Icons.delete_outline, color: Colors.redAccent),
+              title:
+                  const Text('删除', style: TextStyle(color: Colors.redAccent)),
               onTap: () => Navigator.of(ctx).pop('delete'),
             ),
           ],
@@ -979,7 +1008,8 @@ class _BookCard extends StatelessWidget {
             content: TextField(controller: controller, autofocus: true),
             actions: [
               TextButton(
-                  onPressed: () => Navigator.of(ctx).pop(), child: const Text('取消')),
+                  onPressed: () => Navigator.of(ctx).pop(),
+                  child: const Text('取消')),
               FilledButton(
                   onPressed: () => Navigator.of(ctx).pop(controller.text),
                   child: const Text('保存')),
@@ -1009,7 +1039,8 @@ class _BookCard extends StatelessWidget {
                 Text('类型：${_kindLabel(book.kind)}'),
                 Text('占用：${ByteStore.humanSize(size)}'),
                 Text('导入时间：${_fmt(book.importedAt)}'),
-                Text('最近阅读：${book.lastReadAt == null ? '从未' : _fmt(book.lastReadAt!)}'),
+                Text(
+                    '最近阅读：${book.lastReadAt == null ? '从未' : _fmt(book.lastReadAt!)}'),
                 if (book.description != null) ...[
                   const SizedBox(height: 8),
                   Text(book.description!, style: const TextStyle(fontSize: 12)),
@@ -1018,7 +1049,8 @@ class _BookCard extends StatelessWidget {
             ),
             actions: [
               TextButton(
-                  onPressed: () => Navigator.of(ctx).pop(), child: const Text('关闭')),
+                  onPressed: () => Navigator.of(ctx).pop(),
+                  child: const Text('关闭')),
             ],
           ),
         );

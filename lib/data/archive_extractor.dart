@@ -108,8 +108,7 @@ class ArchiveExtractor {
     final total = source.totalUncompressedBytes;
     if (total <= 0) return false;
     if (total > limits.maxTotalBytes) return false;
-    final images =
-        source.entries.where((e) => !e.isDirectory).length;
+    final images = source.entries.where((e) => !e.isDirectory).length;
     if (images > limits.maxEntries) return false;
     // 没什么可解压的（比如只有一两个条目）就不值得
     return images >= 3;
@@ -179,8 +178,7 @@ class ArchiveExtractor {
       return ExtractResult(
         extracted: 0,
         failed: 0,
-        skippedReason:
-            '解压后约 ${_human(source.totalUncompressedBytes)}，'
+        skippedReason: '解压后约 ${_human(source.totalUncompressedBytes)}，'
             '超过上限 ${_human(limits.maxTotalBytes)}，已跳过解压（不影响阅读）',
         bytesWritten: 0,
       );
@@ -237,8 +235,7 @@ class ArchiveExtractor {
       // 总量护栏：超了就停，保留已解压的部分
       if (bytesWritten > limits.maxTotalBytes) {
         aborted = true;
-        abortReason =
-            '已达解压总量上限 ${_human(limits.maxTotalBytes)}，'
+        abortReason = '已达解压总量上限 ${_human(limits.maxTotalBytes)}，'
             '剩余条目读取时按需解压';
         break;
       }
@@ -325,7 +322,8 @@ enum ExtractionState { idle, running, done, skipped, failed }
 
 /// 共享的解压管理器：让 UI（设置面板）能观察进度、取消、清空
 class ExtractionManager {
-  ExtractionManager({required this.store}) : extractor = ArchiveExtractor(store: store);
+  ExtractionManager({required this.store})
+      : extractor = ArchiveExtractor(store: store);
 
   final ByteStore store;
   final ArchiveExtractor extractor;

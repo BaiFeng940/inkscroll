@@ -49,7 +49,8 @@ final class NativeTempFile extends NativeExtractResult {
 
 abstract interface class NativeArchiveBridge {
   /// 只列条目（读中央目录/头信息），不读数据
-  Future<List<ArchiveEntryInfo>> listEntries(String archivePath, {String? password});
+  Future<List<ArchiveEntryInfo>> listEntries(String archivePath,
+      {String? password});
 
   /// ★ 只解这一个条目
   Future<NativeExtractResult> extractEntry(
@@ -188,7 +189,9 @@ class NativeArchiveSource implements ArchiveSource {
 
     switch (result) {
       case NativeBytes(:final bytes):
-        return bytes.length <= need ? bytes : Uint8List.sublistView(bytes, 0, need);
+        return bytes.length <= need
+            ? bytes
+            : Uint8List.sublistView(bytes, 0, need);
       case NativeTempFile temp:
         // 大条目已落盘：用 FileByteSource 按需读取它的区间，
         // 这样"读取图片头部"仍然只读几十 KB，不会把 40MB 全读进内存。

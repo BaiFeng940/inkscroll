@@ -97,8 +97,7 @@ class WebDavByteSource implements RandomAccessByteSource {
   }
 
   @override
-  String toString() =>
-      'WebDavByteSource($url, 请求 $requestCount 次, '
+  String toString() => 'WebDavByteSource($url, 请求 $requestCount 次, '
       '${(bytesFetched / 1024).toStringAsFixed(1)} KB)';
 }
 

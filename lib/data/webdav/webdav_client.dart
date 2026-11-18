@@ -66,11 +66,11 @@ class WebDavEntry {
   }
 
   @override
-  String toString() =>
-      'WebDavEntry($name, dir=$isDirectory, size=$size)';
+  String toString() => 'WebDavEntry($name, dir=$isDirectory, size=$size)';
 }
 
-class WebDavClient {  WebDavClient({
+class WebDavClient {
+  WebDavClient({
     required String baseUrl,
     this.username,
     this.password,
@@ -164,7 +164,8 @@ class WebDavClient {  WebDavClient({
 
     for (final scheme in candidates) {
       final base = _normalizeBase('$scheme://$hostPart');
-      if (candidates.length > 1 && attempts.any((a) => a.startsWith('$base →'))) {
+      if (candidates.length > 1 &&
+          attempts.any((a) => a.startsWith('$base →'))) {
         continue;
       }
       final client = WebDavClient(
@@ -179,17 +180,26 @@ class WebDavClient {  WebDavClient({
         await client.list(base);
         client.close();
         attempts.add('$base → 成功');
-        return WebDavBaseProbe(baseUrl: base, attempts: attempts, switched: hasHttp || hasHttps ? scheme != candidates.first : true);
+        return WebDavBaseProbe(
+            baseUrl: base,
+            attempts: attempts,
+            switched: hasHttp || hasHttps ? scheme != candidates.first : true);
       } on NetworkAuthError {
         // 服务器有回应且明确拒绝 → 协议是对的，问题在账号
         client.close();
         attempts.add('$base → 服务器有响应（认证被拒）');
-        return WebDavBaseProbe(baseUrl: base, attempts: attempts, switched: scheme != candidates.first);
+        return WebDavBaseProbe(
+            baseUrl: base,
+            attempts: attempts,
+            switched: scheme != candidates.first);
       } on NetworkHttpError catch (e) {
         // 同样是"服务器有回应"
         client.close();
         attempts.add('$base → 服务器有响应（HTTP ${e.statusCode}）');
-        return WebDavBaseProbe(baseUrl: base, attempts: attempts, switched: scheme != candidates.first);
+        return WebDavBaseProbe(
+            baseUrl: base,
+            attempts: attempts,
+            switched: scheme != candidates.first);
       } on AppError catch (e) {
         // 连不上 / 证书问题 → 换下一个协议
         client.close();
@@ -288,7 +298,8 @@ class WebDavClient {  WebDavClient({
   ///
   /// 对已经正确编码的 URL 是无操作；对含中文/空格等字符的 URL 会修好它。
   static String _normalizeUrlEncoding(String url) {
-    final m = RegExp(r'^([a-zA-Z][a-zA-Z0-9+.\-]*://[^/]*)(/.*)?$').firstMatch(url);
+    final m =
+        RegExp(r'^([a-zA-Z][a-zA-Z0-9+.\-]*://[^/]*)(/.*)?$').firstMatch(url);
     if (m == null) return url;
     final prefix = m.group(1) ?? '';
     final pathAndQuery = m.group(2) ?? '';
@@ -445,7 +456,8 @@ class WebDavClient {  WebDavClient({
     final out = <WebDavEntry>[];
 
     for (final r in responses) {
-      final hrefEl = r.childElements.firstWhereOrNull((e) => e.name.local == 'href');
+      final hrefEl =
+          r.childElements.firstWhereOrNull((e) => e.name.local == 'href');
       if (hrefEl == null) continue;
       final rawHref = hrefEl.innerText.trim();
       if (rawHref.isEmpty) continue;
@@ -456,18 +468,22 @@ class WebDavClient {  WebDavClient({
 
       // 找到第一个带 prop 的 propstat（有的服务器把 status 200 和 404 分开返回）
       final props = <XmlElement>[];
-      for (final ps in r.childElements.where((e) => e.name.local == 'propstat')) {
-        final prop = ps.childElements.firstWhereOrNull((e) => e.name.local == 'prop');
+      for (final ps
+          in r.childElements.where((e) => e.name.local == 'propstat')) {
+        final prop =
+            ps.childElements.firstWhereOrNull((e) => e.name.local == 'prop');
         if (prop != null) props.addAll(prop.childElements);
       }
 
-      String? textOf(String local) =>
-          props.firstWhereOrNull((e) => e.name.local == local)?.innerText.trim();
+      String? textOf(String local) => props
+          .firstWhereOrNull((e) => e.name.local == local)
+          ?.innerText
+          .trim();
 
       final resourceType =
           props.where((e) => e.name.local == 'resourcetype').toList();
-      final isDir = resourceType.any((rt) =>
-          rt.childElements.any((c) => c.name.local == 'collection'));
+      final isDir = resourceType.any(
+          (rt) => rt.childElements.any((c) => c.name.local == 'collection'));
 
       final sizeText = textOf('getcontentlength');
       final modifiedText = textOf('getlastmodified');
@@ -599,7 +615,9 @@ class WebDavClient {  WebDavClient({
     // 商用网盘会对"短时间内大量 Range 请求"做软限流（429 / 5xx / 连接重置）。
     // 退避重试几次，比让整本书导入失败要好得多。
     var resp = await _sendGet(url, range: 'bytes=$offset-$end');
-    for (var attempt = 0; attempt < 2 && _isTransient(resp.statusCode); attempt++) {
+    for (var attempt = 0;
+        attempt < 2 && _isTransient(resp.statusCode);
+        attempt++) {
       await Future<void>.delayed(Duration(milliseconds: 350 * (attempt + 1)));
       resp = await _sendGet(url, range: 'bytes=$offset-$end');
     }
@@ -667,7 +685,6 @@ class WebDavClient {  WebDavClient({
   Future<List<WebDavEntry>> testConnection() => list(baseUrl);
 }
 
-
 /// [WebDavClient.resolveBaseUrl] 的结果
 class WebDavBaseProbe {
   const WebDavBaseProbe({
@@ -688,6 +705,7 @@ class WebDavBaseProbe {
   @override
   String toString() => 'WebDavBaseProbe($baseUrl, switched=$switched)';
 }
+
 /// 本地实现，避免为了一个方法引入 `package:collection`。
 extension _FirstWhereOrNull<E> on Iterable<E> {
   E? firstWhereOrNull(bool Function(E element) test) {

@@ -1,3 +1,5 @@
+// ignore_for_file: avoid_print
+
 import 'package:inkscroll/data/update_service.dart';
 import 'package:inkscroll/app_version.dart';
 

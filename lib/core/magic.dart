@@ -23,6 +23,7 @@ enum ContainerFormat {
   webp,
   gif,
   bmp,
+
   /// ISO-BMFF 家族（ftyp box）：AVIF / HEIC / HEIF / JPEG2000 等
   avif,
   heic,
@@ -56,7 +57,10 @@ extension ContainerFormatX on ContainerFormat {
 
   /// 能识别但 Flutter 不保证能解码的格式 —— 要单独提示用户
   bool get isKnownButUnsupportedImage => switch (this) {
-        ContainerFormat.jxl || ContainerFormat.psd || ContainerFormat.qoi => true,
+        ContainerFormat.jxl ||
+        ContainerFormat.psd ||
+        ContainerFormat.qoi =>
+          true,
         _ => false,
       };
 
@@ -119,21 +123,38 @@ class MagicDetector {
     // ---------- 位图 ----------
     if (_startsWith(head, [0xFF, 0xD8, 0xFF])) return ContainerFormat.jpeg;
     if (_startsWith(head, [0x89, 0x50, 0x4E, 0x47])) return ContainerFormat.png;
-    if (head.length >= 12 && _ascii(head, 0, 4) == 'RIFF' && _ascii(head, 8, 4) == 'WEBP') {
+    if (head.length >= 12 &&
+        _ascii(head, 0, 4) == 'RIFF' &&
+        _ascii(head, 8, 4) == 'WEBP') {
       return ContainerFormat.webp;
     }
-    if (head.length >= 6 && _ascii(head, 0, 3) == 'GIF') return ContainerFormat.gif;
-    if (head.length >= 2 && _ascii(head, 0, 2) == 'BM') return ContainerFormat.bmp;
+    if (head.length >= 6 && _ascii(head, 0, 3) == 'GIF') {
+      return ContainerFormat.gif;
+    }
+    if (head.length >= 2 && _ascii(head, 0, 2) == 'BM') {
+      return ContainerFormat.bmp;
+    }
     if (_startsWith(head, [0x00, 0x00, 0x01, 0x00])) return ContainerFormat.ico;
-    if (_startsWith(head, [0x38, 0x42, 0x50, 0x53])) return ContainerFormat.psd; // '8BPS'
+    if (_startsWith(head, [0x38, 0x42, 0x50, 0x53])) {
+      return ContainerFormat.psd; // '8BPS'
+    }
     if (head.length >= 4 &&
-        (head[0] == 0x49 && head[1] == 0x49 && head[2] == 0x2A && head[3] == 0x00 ||
-            head[0] == 0x4D && head[1] == 0x4D && head[2] == 0x00 && head[3] == 0x2A)) {
+        (head[0] == 0x49 &&
+                head[1] == 0x49 &&
+                head[2] == 0x2A &&
+                head[3] == 0x00 ||
+            head[0] == 0x4D &&
+                head[1] == 0x4D &&
+                head[2] == 0x00 &&
+                head[3] == 0x2A)) {
       return ContainerFormat.tiff;
     }
-    if (head.length >= 2 && head[0] == 0xFF && head[1] == 0x0A) return ContainerFormat.jxl;
-    if (_startsWith(head, [0x71, 0x6F, 0x69, 0x66])) return ContainerFormat.qoi; // 'qoif'
-    if (head.length >= 4 && _ascii(head, 0, 4) == 'qoif') return ContainerFormat.qoi;
+    if (head.length >= 2 && head[0] == 0xFF && head[1] == 0x0A) {
+      return ContainerFormat.jxl;
+    }
+    if (_startsWith(head, [0x71, 0x6F, 0x69, 0x66])) {
+      return ContainerFormat.qoi; // 'qoif'
+    }
 
     // ---------- ISO-BMFF（ftyp box）：AVIF / HEIC / HEIF ----------
     // 结构：[size:4]['ftyp'][major_brand:4][minor_version:4][compatible_brands...]
@@ -146,8 +167,14 @@ class MagicDetector {
       }
       bool has(String prefix) => brands.any((b) => b.startsWith(prefix));
       if (has('avif') || has('avis')) return ContainerFormat.avif;
-      if (has('heic') || has('heix') || has('hevc') || has('hevx') ||
-          has('heim') || has('heis') || has('mif1') || has('msf1')) {
+      if (has('heic') ||
+          has('heix') ||
+          has('hevc') ||
+          has('hevx') ||
+          has('heim') ||
+          has('heis') ||
+          has('mif1') ||
+          has('msf1')) {
         return ContainerFormat.heic;
       }
       // 其他 ftyp（mp4/mov…）不算图片
@@ -160,7 +187,9 @@ class MagicDetector {
     // ---------- 文本兜底（必须放最后） ----------
     if (looksLikeText(head)) {
       if (looksLikeSvg(head)) return ContainerFormat.svg;
-      return looksLikeHtml(head) ? ContainerFormat.html : ContainerFormat.plainText;
+      return looksLikeHtml(head)
+          ? ContainerFormat.html
+          : ContainerFormat.plainText;
     }
     return ContainerFormat.unknown;
   }

@@ -81,9 +81,8 @@ class WebDavArchiveImporter {
           );
         }
 
-        final capped = images.length > maxPages
-            ? images.sublist(0, maxPages)
-            : images;
+        final capped =
+            images.length > maxPages ? images.sublist(0, maxPages) : images;
 
         // ── 嗅探少量样本 ──
         onProgress?.call(0.3, '正在测量图片尺寸…');
@@ -105,8 +104,10 @@ class WebDavArchiveImporter {
           );
         }
 
-        final valid =
-            aspectsByPath.values.whereType<double>().where((a) => a > 0.02 && a < 50).toList();
+        final valid = aspectsByPath.values
+            .whereType<double>()
+            .where((a) => a > 0.02 && a < 50)
+            .toList();
         final medianAspect = _median(valid);
 
         // ── 建页 ──
@@ -149,13 +150,11 @@ class WebDavArchiveImporter {
               ? DocumentLayoutHint.webtoonPreferred
               : DocumentLayoutHint.pagePreferred,
           warnings: [
-            if (medianAspect == null)
-              '没能读到图片尺寸，滚动时按实际解码结果自动校正。',
+            if (medianAspect == null) '没能读到图片尺寸，滚动时按实际解码结果自动校正。',
             if (unsniffed > 0 && medianAspect != null)
               '有 $unsniffed 张图的尺寸是估算的（按 ${targets.length} 张抽样推算），'
                   '翻到时会自动校正。',
-            if (truncated)
-              '压缩包里有 ${images.length} 张图，已只取前 $maxPages 张。',
+            if (truncated) '压缩包里有 ${images.length} 张图，已只取前 $maxPages 张。',
             '图片在网盘上的压缩包里，阅读时按需下载单页并缓存；'
                 '不会下载整个压缩包。',
           ],
@@ -222,7 +221,9 @@ class WebDavArchiveImporter {
           continue;
         }
         final marker = b[i + 1];
-        if (marker == 0xD8 || marker == 0x01 || (marker >= 0xD0 && marker <= 0xD7)) {
+        if (marker == 0xD8 ||
+            marker == 0x01 ||
+            (marker >= 0xD0 && marker <= 0xD7)) {
           i += 2;
           continue;
         }
@@ -244,10 +245,7 @@ class WebDavArchiveImporter {
       return null;
     }
     // GIF: 6..10 是宽高（小端 16 位）
-    if (b.length > 10 &&
-        b[0] == 0x47 &&
-        b[1] == 0x49 &&
-        b[2] == 0x46) {
+    if (b.length > 10 && b[0] == 0x47 && b[1] == 0x49 && b[2] == 0x46) {
       final w = b[6] | (b[7] << 8);
       final h = b[8] | (b[9] << 8);
       if (w > 0 && h > 0) return w / h;

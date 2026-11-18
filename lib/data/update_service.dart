@@ -94,7 +94,8 @@ class UpdateCheckResult {
 }
 
 class UpdateService {
-  UpdateService({http.Client? client, this.timeout = const Duration(seconds: 8)})
+  UpdateService(
+      {http.Client? client, this.timeout = const Duration(seconds: 8)})
       : _client = client ?? http.Client();
 
   final http.Client _client;
@@ -161,9 +162,8 @@ class UpdateService {
     String? any;
     for (final a in assets) {
       if (a is! Map) continue;
-      final url =
-          (a['browser_download_url'] ?? a['download_url'] ?? a['url'])
-              ?.toString();
+      final url = (a['browser_download_url'] ?? a['download_url'] ?? a['url'])
+          ?.toString();
       final name = (a['name'] ?? '').toString().toLowerCase();
       if (url == null || !name.endsWith('.apk')) continue;
       any ??= url;

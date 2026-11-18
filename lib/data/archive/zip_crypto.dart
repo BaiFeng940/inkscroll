@@ -110,21 +110,3 @@ class ZipCrypto {
     return out;
   }
 }
-
-/// 尝试用 [password] 校验一段密文头，判断密码是否正确。
-///
-/// 传统 ZIP 用解密后头部的**最后一个字节**（有的实现用倒数第二个）与
-/// CRC32 高位或 DOS 时间高位比对。我们两种都试 —— 只用于"提前拒绝明显
-/// 错误的密码"，最终仍以解压/CRC 校验为准。
-bool zipPasswordLooksValid({
-  required Uint8List encryptedHeader12,
-  required String password,
-}) {
-  final crypto = ZipCrypto.withPassword(password);
-  if (crypto == null) return false;
-  if (encryptedHeader12.length < ZipCrypto.headerSize) return false;
-  crypto.decrypt(encryptedHeader12);
-  // 无法在纯 Dart 侧确定条目用的是哪种校验位（CRC 高位 / 时间高位），
-  // 所以这里不做拒绝，交给真正的解压流程判断。
-  return true;
-}

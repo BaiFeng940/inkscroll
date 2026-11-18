@@ -84,7 +84,8 @@ class ShareHandle {
 }
 
 class AuthContext {
-  const AuthContext({this.webViewAvailable = true, this.username, this.password});
+  const AuthContext(
+      {this.webViewAvailable = true, this.username, this.password});
   final bool webViewAvailable;
   final String? username;
   final String? password;
@@ -224,14 +225,18 @@ Future<RemoteArchiveStrategy> chooseRemoteStrategy(
   int hugeThresholdBytes = 4 << 30,
   required Future<bool> Function(Uri link) probeRangeSupport,
 }) async {
-  if (entry.size > hugeThresholdBytes) return RemoteArchiveStrategy.downloadThenOpen;
+  if (entry.size > hugeThresholdBytes) {
+    return RemoteArchiveStrategy.downloadThenOpen;
+  }
 
   final link = await provider.directLink(entry);
   if (link == null) return RemoteArchiveStrategy.downloadThenOpen;
 
   try {
     final ok = await probeRangeSupport(link);
-    return ok ? RemoteArchiveStrategy.remoteRange : RemoteArchiveStrategy.downloadThenOpen;
+    return ok
+        ? RemoteArchiveStrategy.remoteRange
+        : RemoteArchiveStrategy.downloadThenOpen;
   } catch (_) {
     return RemoteArchiveStrategy.downloadThenOpen;
   }

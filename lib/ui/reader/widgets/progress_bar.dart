@@ -46,9 +46,8 @@ class _ReaderProgressBarState extends State<ReaderProgressBar> {
       valueListenable: c.progressRatio,
       builder: (context, ratio, _) {
         final value = (_preview ?? ratio).clamp(0.0, 1.0);
-        final label = _preview == null
-            ? _labelFor(ratio)
-            : _labelFor(_preview!);
+        final label =
+            _preview == null ? _labelFor(ratio) : _labelFor(_preview!);
 
         return Container(
           color: Colors.black.withValues(alpha: 0.45),
@@ -67,8 +66,10 @@ class _ReaderProgressBarState extends State<ReaderProgressBar> {
                 child: SliderTheme(
                   data: SliderTheme.of(context).copyWith(
                     trackHeight: 2,
-                    thumbShape: const RoundSliderThumbShape(enabledThumbRadius: 6),
-                    overlayShape: const RoundSliderOverlayShape(overlayRadius: 14),
+                    thumbShape:
+                        const RoundSliderThumbShape(enabledThumbRadius: 6),
+                    overlayShape:
+                        const RoundSliderOverlayShape(overlayRadius: 14),
                     activeTrackColor: Colors.white,
                     inactiveTrackColor: Colors.white24,
                     thumbColor: Colors.white,

@@ -49,7 +49,8 @@ class FolderImporter implements Importer {
         ));
       }
       copiedCount = 0;
-      await for (final e in Directory(dstRoot).list(recursive: true, followLinks: false)) {
+      await for (final e
+          in Directory(dstRoot).list(recursive: true, followLinks: false)) {
         if (e is File) copiedCount++;
       }
       if (copiedCount == 0) {
@@ -178,8 +179,7 @@ class FolderImporter implements Importer {
         ));
 
     final diagnostics = <String>[
-      if (sniffedCount > 0)
-        '其中 $sniffedCount 个文件按内容识别（扩展名不标准）。',
+      if (sniffedCount > 0) '其中 $sniffedCount 个文件按内容识别（扩展名不标准）。',
       if (unsupportedImages.isNotEmpty)
         '识别到但当前引擎无法解码：'
             '${unsupportedImages.entries.map((e) => '${e.key}×${e.value}').join('、')}。',
@@ -262,9 +262,8 @@ class FolderImporter implements Importer {
     // 旧实现是逐张顺序 await，500 张图要开 500 次文件句柄，串起来很慢。
     // 这里限制并发 8 路（SSD 上收益明显，机械盘/手机闪存也不会因争抢而变慢）。
     // 预算随张数自适应：图多就少读一点，保证总读取量有界。
-    final sniffBudgetBytes = total > 6000
-        ? 48 * 1024
-        : (total > 1500 ? 96 * 1024 : sniffBudget);
+    final sniffBudgetBytes =
+        total > 6000 ? 48 * 1024 : (total > 1500 ? 96 * 1024 : sniffBudget);
 
     ctx.onProgress(0.48, '正在分析图片尺寸 0/$total…');
     final sniffResults = await mapConcurrent<File, double?>(
@@ -388,7 +387,8 @@ class FolderImporter implements Importer {
 
     int chapterIndex = 0;
     for (int i = 0; i < sorted.length; i++) {
-      ctx.onProgress(0.5 + 0.45 * (i / sorted.length), '正在解析 ${p.basename(sorted[i].path)}');
+      ctx.onProgress(0.5 + 0.45 * (i / sorted.length),
+          '正在解析 ${p.basename(sorted[i].path)}');
 
       final Uint8List bytes;
       try {

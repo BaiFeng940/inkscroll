@@ -26,7 +26,6 @@ import 'dart:io';
 import 'dart:typed_data';
 
 import '../core/errors.dart';
-import '../core/image_header.dart';
 import '../data/webdav/webdav_client.dart';
 import 'document.dart';
 import 'page_cache.dart';
@@ -274,8 +273,7 @@ class WebDavPageByteResolver implements PageByteResolver {
     }
   }
 
-  File _fileFor(String url) =>
-      File('${cacheDir.path}/${_hashOf(url)}.img');
+  File _fileFor(String url) => File('${cacheDir.path}/${_hashOf(url)}.img');
 
   static String _hashOf(String url) {
     // 用 url 的 hashCode + 长度做文件名。
@@ -327,16 +325,6 @@ class WebDavPageByteResolver implements PageByteResolver {
       return total;
     } catch (_) {
       return 0;
-    }
-  }
-
-  /// 嗅探单页尺寸（只下头部）
-  Future<ImageDimension?> sniffDimension(PageNode page) async {
-    try {
-      final head = await peekBytes(page);
-      return ImageHeaderParser.tryParse(head);
-    } catch (_) {
-      return null;
     }
   }
 }

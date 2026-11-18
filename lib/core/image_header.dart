@@ -25,11 +25,17 @@ class ImageDimension {
 class ImageHeaderParser {
   /// 解析失败返回 null —— 说明头部字节不够，调用方可以多解一点再试。
   static ImageDimension? tryParse(Uint8List b) {
-    if (b.length >= 24 && b[0] == 0x89 && b[1] == 0x50 && b[2] == 0x4E && b[3] == 0x47) {
+    if (b.length >= 24 &&
+        b[0] == 0x89 &&
+        b[1] == 0x50 &&
+        b[2] == 0x4E &&
+        b[3] == 0x47) {
       return _png(b);
     }
     if (b.length >= 4 && b[0] == 0xFF && b[1] == 0xD8) return _jpeg(b);
-    if (b.length >= 30 && _ascii(b, 0, 4) == 'RIFF' && _ascii(b, 8, 4) == 'WEBP') {
+    if (b.length >= 30 &&
+        _ascii(b, 0, 4) == 'RIFF' &&
+        _ascii(b, 8, 4) == 'WEBP') {
       return _webp(b);
     }
     if (b.length >= 10 && _ascii(b, 0, 3) == 'GIF') {
@@ -108,10 +114,18 @@ class ImageHeaderParser {
       }
 
       // 递归进容器 box
-      if (type == 'meta' || type == 'iprp' || type == 'ipco' ||
-          type == 'moov' || type == 'trak' || type == 'mdia' ||
-          type == 'minf' || type == 'stbl' || type == 'iinf' ||
-          type == 'pitm' || type == 'iloc' || type == 'moov') {
+      if (type == 'meta' ||
+          type == 'iprp' ||
+          type == 'ipco' ||
+          type == 'moov' ||
+          type == 'trak' ||
+          type == 'mdia' ||
+          type == 'minf' ||
+          type == 'stbl' ||
+          type == 'iinf' ||
+          type == 'pitm' ||
+          type == 'iloc' ||
+          type == 'moov') {
         // 'meta' box 在 payload 前有 4 字节 version/flags
         final childStart = type == 'meta' ? p + headerLen + 4 : p + headerLen;
         final r = _findIspe(b, childStart, p + size, depth + 1);
@@ -139,7 +153,9 @@ class ImageHeaderParser {
       }
       final marker = b[i + 1];
       // 无长度字段的 marker
-      if (marker == 0xD8 || marker == 0x01 || (marker >= 0xD0 && marker <= 0xD7)) {
+      if (marker == 0xD8 ||
+          marker == 0x01 ||
+          (marker >= 0xD0 && marker <= 0xD7)) {
         i += 2;
         continue;
       }

@@ -89,9 +89,8 @@ class ZipArchiveSource implements ArchiveSource {
     int cdOffset = _u32(tail, eocd + 16);
 
     // —— Zip64：任一字段被置为哨兵值就走 Zip64 ——
-    final needZip64 = cdOffset == 0xFFFFFFFF ||
-        cdSize == 0xFFFFFFFF ||
-        entryCount == 0xFFFF;
+    final needZip64 =
+        cdOffset == 0xFFFFFFFF || cdSize == 0xFFFFFFFF || entryCount == 0xFFFF;
     if (needZip64) {
       final z = await _readZip64(fileLen, tailStart, tail, eocd);
       if (z != null) {
@@ -112,7 +111,8 @@ class ZipArchiveSource implements ArchiveSource {
     // —— 第 2 步：一次读回中央目录（大包也就几 MB）——
     final cd = await _src.read(cdOffset, cdSize);
     _entries = _parseCentralDirectory(cd, entryCount);
-    _totalUncompressed = _entries.fold<int>(0, (s, e) => s + e.uncompressedSize);
+    _totalUncompressed =
+        _entries.fold<int>(0, (s, e) => s + e.uncompressedSize);
   }
 
   Future<(int, int, int)?> _readZip64(
@@ -141,7 +141,8 @@ class ZipArchiveSource implements ArchiveSource {
   // ------------------------------------------------------------------
   // 解析中央目录
   // ------------------------------------------------------------------
-  List<ArchiveEntryInfo> _parseCentralDirectory(Uint8List cd, int declaredCount) {
+  List<ArchiveEntryInfo> _parseCentralDirectory(
+      Uint8List cd, int declaredCount) {
     final out = <ArchiveEntryInfo>[];
     int p = 0;
 
@@ -452,11 +453,19 @@ class ZipArchiveSource implements ArchiveSource {
   static bool _looksLikeImageHead(Uint8List b) {
     if (b.length < 4) return false;
     if (b[0] == 0xFF && b[1] == 0xD8) return true; // JPEG
-    if (b[0] == 0x89 && b[1] == 0x50 && b[2] == 0x4E && b[3] == 0x47) return true; // PNG
+    if (b[0] == 0x89 && b[1] == 0x50 && b[2] == 0x4E && b[3] == 0x47) {
+      return true; // PNG
+    }
     if (b[0] == 0x47 && b[1] == 0x49 && b[2] == 0x46) return true; // GIF
     if (b.length >= 12 &&
-        b[0] == 0x52 && b[1] == 0x49 && b[2] == 0x46 && b[3] == 0x46 &&
-        b[8] == 0x57 && b[9] == 0x45 && b[10] == 0x42 && b[11] == 0x50) {
+        b[0] == 0x52 &&
+        b[1] == 0x49 &&
+        b[2] == 0x46 &&
+        b[3] == 0x46 &&
+        b[8] == 0x57 &&
+        b[9] == 0x45 &&
+        b[10] == 0x42 &&
+        b[11] == 0x50) {
       return true; // WebP
     }
     if (b[0] == 0x42 && b[1] == 0x4D) return true; // BMP
@@ -478,8 +487,7 @@ class ZipArchiveSource implements ArchiveSource {
       b[o] | (b[o + 1] << 8) | (b[o + 2] << 16) | (b[o + 3] << 24);
 
   /// Dart 的 int 是 64 位且有符号，ZIP64 的字段不会超过 2^53，安全
-  static int _u64(Uint8List b, int o) =>
-      _u32(b, o) + (_u32(b, o + 4) << 32);
+  static int _u64(Uint8List b, int o) => _u32(b, o) + (_u32(b, o + 4) << 32);
 
   /// 防止路径穿越：'../' 与绝对路径都要清理掉。
   /// 本设计不解压到磁盘，但条目名会参与路径拼接与排序，必须规范化。

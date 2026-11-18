@@ -121,6 +121,7 @@ class WebDavFolderImporter implements Importer {
 
   /// 识别/构建时用的连接；不传则从 [buildDocument] 的参数取
   final WebDavConnection? connection;
+
   /// 最多嗅探多少张图的真实尺寸（其余用中位数估算）
   ///
   /// ★ 从 16 降到 4：同一个漫画文件夹里的图几乎总是同一个尺寸，
@@ -279,7 +280,8 @@ class WebDavFolderImporter implements Importer {
     required String folderName,
     required List<WebDavEntry> images,
   }) async {
-    final capped = images.length > maxPages ? images.sublist(0, maxPages) : images;
+    final capped =
+        images.length > maxPages ? images.sublist(0, maxPages) : images;
 
     // ── 嗅探前 N 张的尺寸 ──
     ctx?.onProgress(0.3, '正在测量图片尺寸…');
@@ -300,7 +302,10 @@ class WebDavFolderImporter implements Importer {
       );
     }
 
-    final valid = sampleAspects.whereType<double>().where((a) => a > 0.02 && a < 50).toList();
+    final valid = sampleAspects
+        .whereType<double>()
+        .where((a) => a > 0.02 && a < 50)
+        .toList();
     final medianAspect = valid.isEmpty ? null : _median(valid);
 
     // ── 建页 ──
@@ -341,13 +346,11 @@ class WebDavFolderImporter implements Importer {
           ? DocumentLayoutHint.webtoonPreferred
           : DocumentLayoutHint.pagePreferred,
       warnings: [
-        if (medianAspect == null)
-          '没能读到图片尺寸，滚动时按实际解码结果自动校正。',
+        if (medianAspect == null) '没能读到图片尺寸，滚动时按实际解码结果自动校正。',
         if (unsniffed > 0 && medianAspect != null)
           '有 $unsniffed 张图的尺寸是估算的（按前 $sampleCount 张推算），'
               '翻到时会自动校正。',
-        if (truncated)
-          '文件夹里有 ${images.length} 张图，已只取前 $maxPages 张。',
+        if (truncated) '文件夹里有 ${images.length} 张图，已只取前 $maxPages 张。',
         '这些图片在网盘上，阅读时需要联网；看过的页会自动缓存到本地。',
       ],
     );
@@ -494,8 +497,8 @@ class WebDavFolderImporter implements Importer {
     // PROPFIND 的往返就有几十到几百毫秒，100 个文件夹光等就几十秒。
     // 这里用固定大小的 worker 池并发，结果按**原始顺序**放回数组，
     // 保证导入顺序和目录名自然序一致（并发完成顺序不可控）。
-    final slots = List<List<WebDavComicCandidate>?>.filled(
-        scanTargets.length, null);
+    final slots =
+        List<List<WebDavComicCandidate>?>.filled(scanTargets.length, null);
     var next = 0;
     var done = 0;
 
@@ -529,7 +532,6 @@ class WebDavFolderImporter implements Importer {
 
     return out;
   }
-
 
   /// 每一层"合集"最多再展开多少个子目录（防止误选根目录时炸开）
   static const int maxNested = 40;
@@ -715,8 +717,10 @@ class WebDavFolderImporter implements Importer {
     }
     return out;
   }
+
   static String _folderNameOf(String url) {
-    final segs = Uri.tryParse(url)?.pathSegments.where((s) => s.isNotEmpty).toList();
+    final segs =
+        Uri.tryParse(url)?.pathSegments.where((s) => s.isNotEmpty).toList();
     if (segs == null || segs.isEmpty) return '网盘文件夹';
     return segs.last;
   }
@@ -757,7 +761,8 @@ class WebDavFolderImporter implements Importer {
     final subs = entries.where((e) => e.isDirectory).take(maxNested).toList()
       ..sort((a, b) => compareByOriginalName(a.name, b.name));
 
-    final slots = List<List<WebDavCollectionChapter>?>.filled(subs.length, null);
+    final slots =
+        List<List<WebDavCollectionChapter>?>.filled(subs.length, null);
     var nextSub = 0;
 
     Future<void> subWorker() async {
@@ -942,8 +947,7 @@ class WebDavFolderImporter implements Importer {
       // 漫画默认按页翻（不是 Webtoon 长图）：合集通常是单页扫描件
       hint: DocumentLayoutHint.pagePreferred,
       warnings: [
-        if (chapters.isNotEmpty)
-          '已把 ${chapters.length} 话合并成一本书，章节菜单里可切换。',
+        if (chapters.isNotEmpty) '已把 ${chapters.length} 话合并成一本书，章节菜单里可切换。',
         '这些图片在网盘上，阅读时需要联网；看过的页会自动缓存到本地。',
       ],
     );

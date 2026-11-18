@@ -38,8 +38,15 @@ class DocumentCodec {
     final tmp = File('${file.path}.tmp');
     // 先写临时文件再改名：避免写入过程中被杀导致文件损坏
     await tmp.writeAsString(jsonEncode(toJson(doc)), flush: true);
-    if (await file.exists()) await file.delete();
-    await tmp.rename(file.path);
+    // rename 在 POSIX 上可原子覆盖已存在的目标。旧实现"先删旧再改名"，
+    // 两步之间进程死掉会丢整个 document.json（代价是全量重建）。
+    // Windows 上目标被占用时 rename 可能拋异常 —— 再退回"删旧再改名"。
+    try {
+      await tmp.rename(file.path);
+    } on FileSystemException {
+      if (await file.exists()) await file.delete();
+      await tmp.rename(file.path);
+    }
   }
 
   static Future<Document?> load(String bookDir) async {
@@ -100,8 +107,8 @@ class DocumentCodec {
       chapters: chapters,
       pages: pages,
       unit: _enumByName(ReadingUnit.values, m['unit'], ReadingUnit.page),
-      hint: _enumByName(
-          DocumentLayoutHint.values, m['hint'], DocumentLayoutHint.webtoonPreferred),
+      hint: _enumByName(DocumentLayoutHint.values, m['hint'],
+          DocumentLayoutHint.webtoonPreferred),
       warnings: (m['warnings'] as List?)?.cast<String>() ?? const [],
     );
   }
@@ -120,7 +127,8 @@ class DocumentCodec {
         kind: _enumByName(PageKind.values, m['kind'], PageKind.image),
         aspectRatio: (m['aspect'] as num?)?.toDouble(),
         title: m['title'] as String?,
-        content: _contentFromJson((m['content'] as Map).cast<String, dynamic>()),
+        content:
+            _contentFromJson((m['content'] as Map).cast<String, dynamic>()),
       );
 
   static Map<String, dynamic> _contentToJson(PageContent c) {
@@ -237,7 +245,8 @@ class DocumentCodec {
     }
   }
 
-  static T _enumByName<T extends Enum>(List<T> values, Object? name, T fallback) {
+  static T _enumByName<T extends Enum>(
+      List<T> values, Object? name, T fallback) {
     if (name is! String) return fallback;
     for (final v in values) {
       if (v.name == name) return v;

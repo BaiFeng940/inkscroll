@@ -16,7 +16,6 @@ import 'dart:math' as math;
 import 'package:flutter/foundation.dart';
 
 import '../core/errors.dart';
-import '../core/image_header.dart';
 import '../core/lru_cache.dart';
 import '../data/archive/archive_source.dart';
 import '../data/byte_store.dart';
@@ -137,7 +136,8 @@ class ArchivePageByteResolver implements PageByteResolver {
     // 文件不存在时自动回退 —— 所以"解压到一半就开始看书"是安全的。
     final dir = extractedDir;
     if (dir != null) {
-      final f = File('$dir/${ByteStore.archiveEntryToFileName(contentRef.entryPath)}');
+      final f = File(
+          '$dir/${ByteStore.archiveEntryToFileName(contentRef.entryPath)}');
       try {
         if (await f.exists()) {
           final bytes = await f.readAsBytes();
@@ -150,8 +150,7 @@ class ArchivePageByteResolver implements PageByteResolver {
       } catch (_) {
         // 读失败不致命，回退到 zip 读取
       }
-    } else {
-    }
+    } else {}
 
     // ② 回退：按需从压缩包解压单个条目
     final entry = _source.entries.firstWhere(
@@ -237,7 +236,8 @@ class FilePageByteResolver implements PageByteResolver {
 
     final file = File(ref.path);
     if (!await file.exists()) {
-      throw GenericError('文件不存在或已被移动：${ref.path}', action: ErrorAction.chooseAnother);
+      throw GenericError('文件不存在或已被移动：${ref.path}',
+          action: ErrorAction.chooseAnother);
     }
     final bytes = await file.readAsBytes();
     _cache.put(page.id, bytes);
@@ -277,14 +277,9 @@ class EmptyPageByteResolver implements PageByteResolver {
   Future<Uint8List> imageBytes(PageNode page) async => Uint8List(0);
 
   @override
-  Future<Uint8List> peekBytes(PageNode page, {int bytes = 192 * 1024}) async => Uint8List(0);
+  Future<Uint8List> peekBytes(PageNode page, {int bytes = 192 * 1024}) async =>
+      Uint8List(0);
 
   @override
   Future<void> dispose() async {}
 }
-
-/// 尺寸嗅探工具：给一页的头部字节，解析出宽高
-class PageDimensionSniffer {
-  static ImageDimension? sniff(Uint8List head) => ImageHeaderParser.tryParse(head);
-}
-

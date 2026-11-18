@@ -207,10 +207,12 @@ class BookMeta {
           (k) => k.name == json['kind'],
           orElse: () => BookKind.comic,
         ),
-        source: BookSource.fromJson((json['source'] as Map).cast<String, dynamic>()),
+        source: BookSource.fromJson(
+            (json['source'] as Map).cast<String, dynamic>()),
         pageCount: json['pageCount'] as int? ?? 0,
         chapterCount: json['chapterCount'] as int? ?? 1,
-        importedAt: DateTime.tryParse(json['importedAt'] as String? ?? '') ?? DateTime.now(),
+        importedAt: DateTime.tryParse(json['importedAt'] as String? ?? '') ??
+            DateTime.now(),
         coverPath: json['coverPath'] as String?,
         author: json['author'] as String?,
         isFavorite: json['isFavorite'] as bool? ?? false,

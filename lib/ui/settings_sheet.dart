@@ -99,7 +99,8 @@ class _SettingsSheetState extends State<_SettingsSheet> {
                     title: Text(mode.label),
                     subtitle: Text(
                       mode.description,
-                      style: const TextStyle(fontSize: 12, color: Colors.white54),
+                      style:
+                          const TextStyle(fontSize: 12, color: Colors.white54),
                     ),
                   )),
 
@@ -119,12 +120,15 @@ class _SettingsSheetState extends State<_SettingsSheet> {
                         color: bg.color,
                         borderRadius: BorderRadius.circular(8),
                         border: Border.all(
-                          color: selected ? const Color(0xFF5B7CFA) : Colors.white24,
+                          color: selected
+                              ? const Color(0xFF5B7CFA)
+                              : Colors.white24,
                           width: selected ? 2 : 1,
                         ),
                       ),
                       alignment: Alignment.center,
-                      child: Text(bg.label, style: TextStyle(color: bg.onColor, fontSize: 12)),
+                      child: Text(bg.label,
+                          style: TextStyle(color: bg.onColor, fontSize: 12)),
                     ),
                   );
                 }).toList(),
@@ -182,6 +186,41 @@ class _SettingsSheetState extends State<_SettingsSheet> {
                 onChanged: (v) => _update(_s.copyWith(screenBrightness: v)),
               ),
 
+              const _SectionTitle('翻页动画'),
+              const SizedBox(height: 6),
+              SegmentedButton<PageTurnAnim>(
+                segments: [
+                  for (final a in PageTurnAnim.values)
+                    ButtonSegment(value: a, label: Text(a.label)),
+                ],
+                selected: {_s.pageTurnAnim},
+                showSelectedIcon: false,
+                onSelectionChanged: (sel) =>
+                    _update(_s.copyWith(pageTurnAnim: sel.first)),
+              ),
+
+              const _SectionTitle('翻页顶部留白'),
+              SwitchListTile(
+                dense: true,
+                contentPadding: EdgeInsets.zero,
+                value: _s.reserveTopInset,
+                onChanged: (v) => _update(_s.copyWith(reserveTopInset: v)),
+                title:
+                    const Text('竖屏翻页时在页面上方留白', style: TextStyle(fontSize: 14)),
+                subtitle: const Text('避免第一页顶部被状态栏、通知图标或挖孔遮挡',
+                    style: TextStyle(fontSize: 12, color: Colors.white54)),
+              ),
+
+              const _SectionTitle('屏幕常亮'),
+              SwitchListTile(
+                dense: true,
+                contentPadding: EdgeInsets.zero,
+                value: _s.keepScreenOn,
+                onChanged: (v) => _update(_s.copyWith(keepScreenOn: v)),
+                title: const Text('阅读时保持屏幕常亮', style: TextStyle(fontSize: 14)),
+                subtitle: const Text('退出阅读器后恢复系统默认行为',
+                    style: TextStyle(fontSize: 12, color: Colors.white54)),
+              ),
 
               const SizedBox(height: 12),
               const _SectionTitle('章节跳转'),
@@ -193,7 +232,6 @@ class _SettingsSheetState extends State<_SettingsSheet> {
                   dropdownColor: const Color(0xFF2A2A2A),
                   style: const TextStyle(color: Colors.white, fontSize: 13),
                   decoration: const InputDecoration(
-
                     isDense: true,
                     contentPadding:
                         EdgeInsets.symmetric(horizontal: 12, vertical: 8),
@@ -361,7 +399,9 @@ class _ExtractionCardState extends State<_ExtractionCard> {
                     child: Text(
                       title,
                       style: TextStyle(
-                          color: color, fontSize: 13, fontWeight: FontWeight.w600),
+                          color: color,
+                          fontSize: 13,
+                          fontWeight: FontWeight.w600),
                     ),
                   ),
                   if (state == ExtractionState.running)
@@ -396,8 +436,7 @@ class _ExtractionCardState extends State<_ExtractionCard> {
                   alignment: Alignment.centerRight,
                   child: TextButton.icon(
                     icon: const Icon(Icons.delete_sweep_outlined, size: 16),
-                    label: const Text('清除解压缓存',
-                        style: TextStyle(fontSize: 12)),
+                    label: const Text('清除解压缓存', style: TextStyle(fontSize: 12)),
                     onPressed: () async {
                       await widget.manager.clearFor(widget.bookId);
                       await _refreshSize();

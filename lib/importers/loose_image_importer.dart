@@ -141,8 +141,7 @@ class LooseImageImporter implements Importer {
           ? DocumentLayoutHint.webtoonPreferred
           : DocumentLayoutHint.pagePreferred,
       warnings: [
-        if (!manuallyOrdered)
-          '已按文件名自然排序（例如 2.jpg 排在 10.jpg 前面）。',
+        if (!manuallyOrdered) '已按文件名自然排序（例如 2.jpg 排在 10.jpg 前面）。',
         if (manuallyOrdered) '已使用你手动调整的顺序。',
         if (unknown > 0 && unknown < copied.length)
           '有 $unknown 张图未取到尺寸，滚动到时自动测量。',

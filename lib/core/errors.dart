@@ -14,7 +14,8 @@ enum ErrorAction {
 }
 
 sealed class AppError implements Exception {
-  const AppError(this.message, {this.technicalDetail, this.action = ErrorAction.none});
+  const AppError(this.message,
+      {this.technicalDetail, this.action = ErrorAction.none});
 
   /// 面向用户的中文提示
   final String message;

@@ -40,12 +40,29 @@ const kUnsupportedImageExtensions = {
 
 /// 支持的纯文本扩展名
 const kTextExtensions = {
-  '.txt', '.md', '.markdown', '.log', '.text', '.nfo', '.srt', '.ass', '.vtt',
+  '.txt',
+  '.md',
+  '.markdown',
+  '.log',
+  '.text',
+  '.nfo',
+  '.srt',
+  '.ass',
+  '.vtt',
 };
 
 /// 压缩包扩展名
 const kArchiveExtensions = {
-  '.zip', '.tar', '.gz', '.tgz', '.rar', '.7z', '.cbz', '.cbr', '.cb7', '.cbt',
+  '.zip',
+  '.tar',
+  '.gz',
+  '.tgz',
+  '.rar',
+  '.7z',
+  '.cbz',
+  '.cbr',
+  '.cb7',
+  '.cbt',
 };
 
 /// 导入文件夹时允许复制的全部扩展名。
@@ -71,8 +88,7 @@ String stripImportIndexPrefix(String fileName) {
 ///
 /// 注意这里只影响**排序**，不改动磁盘上的真实文件名 ——
 /// 这样既尊重用户的命名，又不破坏"打开书就是本地文件"的稳定性。
-int compareByOriginalName(String a, String b) =>
-    NaturalComparator.comparePath(
+int compareByOriginalName(String a, String b) => NaturalComparator.comparePath(
       stripImportIndexPrefix(a),
       stripImportIndexPrefix(b),
     );
@@ -150,7 +166,8 @@ Future<SniffResult?> sniffFileKind(
         );
       }
       if (fmt.isKnownButUnsupportedImage) {
-        return SniffResult(kind: FileKind.unsupportedImage, formatLabel: fmt.label);
+        return SniffResult(
+            kind: FileKind.unsupportedImage, formatLabel: fmt.label);
       }
       switch (fmt) {
         case ContainerFormat.zip:
@@ -218,15 +235,20 @@ Future<void> ensureReadableDirectory(String path) async {
 bool isJunkEntry(String entryPath) {
   final lower = entryPath.toLowerCase();
   final base = p.basename(lower);
-  if (lower.startsWith('__macosx/') || lower.contains('/__macosx/')) return true;
-  if (base == '.ds_store' || base == 'thumbs.db' || base == 'desktop.ini') return true;
+  if (lower.startsWith('__macosx/') || lower.contains('/__macosx/')) {
+    return true;
+  }
+  if (base == '.ds_store' || base == 'thumbs.db' || base == 'desktop.ini') {
+    return true;
+  }
   if (base.startsWith('._')) return true; // macOS 资源分叉文件
   if (lower.endsWith('/.gitkeep')) return true;
   return false;
 }
 
 /// 自然排序（逐段比较，避免 '第1话/10.jpg' 与 '第10话/1.jpg' 错位）
-int naturalComparePath(String a, String b) => NaturalComparator.comparePath(a, b);
+int naturalComparePath(String a, String b) =>
+    NaturalComparator.comparePath(a, b);
 
 /// 目录前缀，'' 表示根
 String parentDirOf(String path) {
@@ -266,6 +288,7 @@ class CollectResult {
   /// 是否因达到 maxFiles 而提前停止
   final bool truncated;
 }
+
 Future<CollectResult> collectFiles(
   Directory root, {
   int maxDepth = 6,
@@ -279,7 +302,8 @@ Future<CollectResult> collectFiles(
   // 用平台分隔符计算深度；Windows 与 Android 都是 '\' 与 '/' 混用的历史包袱，
   // 这里统一按两种分隔符取最大切分数，避免深度算错导致漏文件。
   int depthOf(String path) {
-    final rel = path.startsWith(root.path) ? path.substring(root.path.length) : path;
+    final rel =
+        path.startsWith(root.path) ? path.substring(root.path.length) : path;
     final norm = rel.replaceAll('\\', '/');
     return norm.split('/').where((s) => s.isNotEmpty).length;
   }
@@ -310,7 +334,10 @@ Future<CollectResult> collectFiles(
 
 /// 是否看起来像长条（Webtoon）—— 用于给出默认模式建议
 bool looksLikeWebtoon(Iterable<double?> aspectRatios) {
-  final known = aspectRatios.whereType<double>().where((a) => a.isFinite && a > 0).toList();
+  final known = aspectRatios
+      .whereType<double>()
+      .where((a) => a.isFinite && a > 0)
+      .toList();
   if (known.length < 3) return false;
   known.sort();
   final median = known[known.length ~/ 2];

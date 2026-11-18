@@ -26,7 +26,8 @@ class TextPageView extends StatelessWidget {
       return const SizedBox.shrink();
     }
 
-    final isHeading = content.headingLevel != null && content.headingLevel! <= 2;
+    final isHeading =
+        content.headingLevel != null && content.headingLevel! <= 2;
     final color = settings.background.onColor;
 
     return Container(
@@ -45,9 +46,7 @@ class TextPageView extends StatelessWidget {
           content.text,
           style: TextStyle(
             color: color,
-            fontSize: isHeading
-                ? settings.fontSize * 1.35
-                : settings.fontSize,
+            fontSize: isHeading ? settings.fontSize * 1.35 : settings.fontSize,
             fontWeight: isHeading ? FontWeight.w700 : FontWeight.w400,
             height: settings.lineHeight,
             letterSpacing: 0.2,

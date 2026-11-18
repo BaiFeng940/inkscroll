@@ -32,8 +32,7 @@ extension ReadingModeX on ReadingMode {
       };
 
   String get description => switch (this) {
-        ReadingMode.horizontal =>
-          '左右拖动或点击屏幕两侧翻页，点击中间呼出菜单（一页一屏）',
+        ReadingMode.horizontal => '左右拖动或点击屏幕两侧翻页，点击中间呼出菜单（一页一屏）',
         ReadingMode.verticalContinuous => '纵向连续滚动，多页无缝拼接成一条长页（Webtoon）',
       };
 
@@ -68,7 +67,40 @@ extension ReaderBackgroundX on ReaderBackground {
         ReaderBackground.gray || ReaderBackground.black => Colors.white70,
       };
 
-  bool get isDark => this == ReaderBackground.gray || this == ReaderBackground.black;
+  bool get isDark =>
+      this == ReaderBackground.gray || this == ReaderBackground.black;
+}
+
+/// 翻页动画档位。
+///
+/// 高刷设备上短促动画观感好；低端机或喜欢"零延迟"的用户可以关掉。
+enum PageTurnAnim { off, fast, normal }
+
+extension PageTurnAnimX on PageTurnAnim {
+  String get label => switch (this) {
+        PageTurnAnim.off => '关',
+        PageTurnAnim.fast => '快',
+        PageTurnAnim.normal => '标准',
+      };
+
+  Duration get duration => switch (this) {
+        PageTurnAnim.off => Duration.zero,
+        PageTurnAnim.fast => const Duration(milliseconds: 140),
+        PageTurnAnim.normal => const Duration(milliseconds: 220),
+      };
+}
+
+/// 屏幕刷新率策略。
+///
+/// 旧实现写死"≤120Hz 的最大档"，144Hz 设备会被压到 60Hz；现在交给用户选。
+enum HighRefreshMode { standard120, max, system }
+
+extension HighRefreshModeX on HighRefreshMode {
+  String get label => switch (this) {
+        HighRefreshMode.standard120 => '标准（最高 120Hz）',
+        HighRefreshMode.max => '拉满（用屏幕最高档）',
+        HighRefreshMode.system => '跟随系统',
+      };
 }
 
 class ReaderSettings {
@@ -82,6 +114,9 @@ class ReaderSettings {
     this.tapZoneRight = 0.25,
     this.screenBrightness = 1.0,
     this.keepScreenOn = true,
+    this.pageTurnAnim = PageTurnAnim.normal,
+    this.highRefreshMode = HighRefreshMode.standard120,
+    this.reserveTopInset = true,
     this.themeMode = ThemeMode.system,
     this.lastModePerBook = const {},
     this.defaultMode,
@@ -100,6 +135,16 @@ class ReaderSettings {
   /// 0.5 ~ 1.0 的阅读亮度覆盖（不修改系统亮度）
   final double screenBrightness;
   final bool keepScreenOn;
+
+  /// 翻页/跳转动画档位（关 / 快 / 标准）
+  final PageTurnAnim pageTurnAnim;
+
+  /// 高刷档位策略（标准 120 / 拉满 / 跟随系统）
+  final HighRefreshMode highRefreshMode;
+
+  /// 竖屏翻页时在页面上方预留系统栏/挖孔高度，
+  /// 避免第一页顶部被通知栏或其他组件遮挡
+  final bool reserveTopInset;
 
   final ThemeMode themeMode;
 
@@ -123,6 +168,9 @@ class ReaderSettings {
     double? tapZoneRight,
     double? screenBrightness,
     bool? keepScreenOn,
+    PageTurnAnim? pageTurnAnim,
+    HighRefreshMode? highRefreshMode,
+    bool? reserveTopInset,
     ThemeMode? themeMode,
     Map<String, ReadingMode>? lastModePerBook,
     ReadingMode? defaultMode,
@@ -138,11 +186,13 @@ class ReaderSettings {
       tapZoneRight: tapZoneRight ?? this.tapZoneRight,
       screenBrightness: screenBrightness ?? this.screenBrightness,
       keepScreenOn: keepScreenOn ?? this.keepScreenOn,
+      pageTurnAnim: pageTurnAnim ?? this.pageTurnAnim,
+      highRefreshMode: highRefreshMode ?? this.highRefreshMode,
+      reserveTopInset: reserveTopInset ?? this.reserveTopInset,
       themeMode: themeMode ?? this.themeMode,
       lastModePerBook: lastModePerBook ?? this.lastModePerBook,
       // 用 clearDefaultMode 显式表达"恢复自动"，因为 null 也是有效值
-      defaultMode:
-          clearDefaultMode ? null : (defaultMode ?? this.defaultMode),
+      defaultMode: clearDefaultMode ? null : (defaultMode ?? this.defaultMode),
     );
   }
 
@@ -156,9 +206,11 @@ class ReaderSettings {
         'tapZoneRight': tapZoneRight,
         'screenBrightness': screenBrightness,
         'keepScreenOn': keepScreenOn,
+        'pageTurnAnim': pageTurnAnim.name,
+        'highRefreshMode': highRefreshMode.name,
+        'reserveTopInset': reserveTopInset,
         'themeMode': themeMode.name,
-        'lastModePerBook':
-            lastModePerBook.map((k, v) => MapEntry(k, v.name)),
+        'lastModePerBook': lastModePerBook.map((k, v) => MapEntry(k, v.name)),
         if (defaultMode != null) 'defaultMode': defaultMode!.name,
       };
 
@@ -174,7 +226,13 @@ class ReaderSettings {
       tapZoneRight: (json['tapZoneRight'] as num?)?.toDouble() ?? 0.25,
       screenBrightness: (json['screenBrightness'] as num?)?.toDouble() ?? 1.0,
       keepScreenOn: json['keepScreenOn'] as bool? ?? true,
-      themeMode: _enumByName(ThemeMode.values, json['themeMode'], ThemeMode.system),
+      pageTurnAnim: _enumByName(
+          PageTurnAnim.values, json['pageTurnAnim'], PageTurnAnim.normal),
+      highRefreshMode: _enumByName(HighRefreshMode.values,
+          json['highRefreshMode'], HighRefreshMode.standard120),
+      reserveTopInset: json['reserveTopInset'] as bool? ?? true,
+      themeMode:
+          _enumByName(ThemeMode.values, json['themeMode'], ThemeMode.system),
       lastModePerBook: ((json['lastModePerBook'] as Map?) ?? const {})
           .map((k, v) => MapEntry(k as String, _modeFromName(v))),
       // 缺省 / null = 自动（不能回退成某个具体模式，否则升级后
@@ -206,7 +264,8 @@ class ReaderSettings {
 
   ThemeData themeData({required Brightness brightness}) {
     const seed = Color(0xFF5B7CFA);
-    final scheme = ColorScheme.fromSeed(seedColor: seed, brightness: brightness);
+    final scheme =
+        ColorScheme.fromSeed(seedColor: seed, brightness: brightness);
     return ThemeData(
       colorScheme: scheme,
       useMaterial3: true,
@@ -245,7 +304,8 @@ class ReaderSettings {
     );
   }
 
-  static T _enumByName<T extends Enum>(List<T> values, Object? name, T fallback) {
+  static T _enumByName<T extends Enum>(
+      List<T> values, Object? name, T fallback) {
     if (name is! String) return fallback;
     for (final v in values) {
       if (v.name == name) return v;

@@ -83,7 +83,7 @@ Future<void> main(List<String> args) async {
     if (serial > 0) {
       final speedup = serial / parallel;
       stdout.writeln('');
-      stdout.writeln('  串行 ${serial} ms → 并发 ${parallel} ms'
+      stdout.writeln('  串行 $serial ms → 并发 $parallel ms'
           '，加速 ${speedup.toStringAsFixed(2)}x');
       stdout.writeln('  按 170 本估算：'
           '${(serial / zips.length * 170 / 1000).toStringAsFixed(0)} 秒 → '
