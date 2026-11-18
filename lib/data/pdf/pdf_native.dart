@@ -37,15 +37,25 @@ class PdfNative {
   static const MethodChannel _ch = MethodChannel('inkscroll/pdf');
 
   /// 打开并读取页数/尺寸。失败抛异常（调用方转成 AppError）。
+  ///
+  /// 密码 PDF 抛出带明确文案的异常 —— 原生侧用独立错误码区分
+  ///（旧实现加密/损坏一律报"打不开这个 PDF"，用户会反复重试）。
   Future<PdfInfo> open(String path) async {
-    final r =
-        await _ch.invokeMapMethod<String, dynamic>('open', {'path': path});
-    if (r == null) throw StateError('PDF 打开失败');
-    return PdfInfo(
-      pageCount: (r['pageCount'] as int?) ?? 0,
-      widths: ((r['widths'] as List?) ?? const []).cast<int>(),
-      heights: ((r['heights'] as List?) ?? const []).cast<int>(),
-    );
+    try {
+      final r =
+          await _ch.invokeMapMethod<String, dynamic>('open', {'path': path});
+      if (r == null) throw StateError('PDF 打开失败');
+      return PdfInfo(
+        pageCount: (r['pageCount'] as int?) ?? 0,
+        widths: ((r['widths'] as List?) ?? const []).cast<int>(),
+        heights: ((r['heights'] as List?) ?? const []).cast<int>(),
+      );
+    } on PlatformException catch (e) {
+      if (e.code == 'pdf_encrypted') {
+        throw StateError('PDF 已加密（需要密码），暂不支持密码 PDF，请先解密后再导入');
+      }
+      rethrow;
+    }
   }
 
   /// 渲染一页为 PNG 字节。

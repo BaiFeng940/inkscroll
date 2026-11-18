@@ -85,6 +85,10 @@ class PdfPlugin(
                             )
                         )
                     }
+                } catch (e: SecurityException) {
+                    // PdfRenderer 对密码 PDF 抛 SecurityException：
+                    // 给 Dart 侧一个可识别的错误码，避免用户看到笼统的"打不开"
+                    result.error("pdf_encrypted", "PDF 已加密（暂不支持密码 PDF）", null)
                 } catch (e: Exception) {
                     result.error("pdf_open_failed", e.message ?: "$e", null)
                 }
