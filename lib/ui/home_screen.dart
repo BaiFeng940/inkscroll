@@ -508,8 +508,8 @@ class _HomeScreenState extends State<HomeScreen>
         // 批量管理状态下：返回手势退出的是「批量管理」本身，不是整个应用。
         // 非选择模式则交给系统默认行为（退出首页）。
         canPop: !_selecting,
-        onPopRequested: (_) {
-          if (_selecting) _exitSelect();
+        onPopInvokedWithResult: (didPop, _) {
+          if (!didPop && _selecting) _exitSelect();
         },
         child: Column(
         children: [
@@ -621,6 +621,7 @@ class _HomeScreenState extends State<HomeScreen>
             ),
           ),
         ],
+      ),
       ),
       floatingActionButton: _tabs.index == 0
           ? FloatingActionButton.extended(
