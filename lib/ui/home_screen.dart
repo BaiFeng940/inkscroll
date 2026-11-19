@@ -504,7 +504,14 @@ class _HomeScreenState extends State<HomeScreen>
     //   既占高度又没用。现在顶部只留**真正要用的东西**：
     //   搜索框 + 设置按钮，和下方 Tab 一起贴在状态栏底下。
     return Scaffold(
-      body: Column(
+      body: PopScope(
+        // 批量管理状态下：返回手势退出的是「批量管理」本身，不是整个应用。
+        // 非选择模式则交给系统默认行为（退出首页）。
+        canPop: !_selecting,
+        onPopRequested: (_) {
+          if (_selecting) _exitSelect();
+        },
+        child: Column(
         children: [
           // ── 顶部：搜索框 + 设置（批量选择时换成选择栏）──
           if (_selecting)
@@ -579,7 +586,6 @@ class _HomeScreenState extends State<HomeScreen>
                   books: app.searchIn(app.localBooks, _query),
                   onOpen: _openBook,
                   onChanged: () => app.refreshBooks(),
-                  onDelete: _confirmDelete,
                   selecting: _selecting,
                   selected: _selected,
                   onStartSelect: _startSelect,
@@ -591,7 +597,6 @@ class _HomeScreenState extends State<HomeScreen>
                   books: app.searchIn(app.onlineBooks, _query),
                   onOpen: _openBook,
                   onChanged: () => app.refreshBooks(),
-                  onDelete: _confirmDelete,
                   selecting: _selecting,
                   selected: _selected,
                   onStartSelect: _startSelect,
@@ -625,30 +630,6 @@ class _HomeScreenState extends State<HomeScreen>
             )
           : null,
     );
-  }
-
-  Future<void> _confirmDelete(BookMeta book) async {
-    final app = context.read<AppState>();
-    final ok = await showDialog<bool>(
-      context: context,
-      builder: (ctx) => AlertDialog(
-        title: const Text('删除书籍'),
-        content: Text('确定要删除「${book.title}」吗？\n'
-            '本地导入的文件也会一并删除，无法恢复。'),
-        actions: [
-          TextButton(
-              onPressed: () => Navigator.of(ctx).pop(false),
-              child: const Text('取消')),
-          FilledButton(
-              onPressed: () => Navigator.of(ctx).pop(true),
-              child: const Text('删除')),
-        ],
-      ),
-    );
-    if (ok == true) {
-      await app.deleteBook(book.id);
-      if (mounted) _snack('已删除');
-    }
   }
 
   Future<String?> _askForText({
@@ -721,7 +702,6 @@ class _BookGrid extends StatelessWidget {
     required this.books,
     required this.onOpen,
     required this.onChanged,
-    required this.onDelete,
     required this.onStartSelect,
     required this.onToggleSelect,
     this.selecting = false,
@@ -733,7 +713,6 @@ class _BookGrid extends StatelessWidget {
   final List<BookMeta> books;
   final Future<void> Function(BookMeta) onOpen;
   final Future<void> Function() onChanged;
-  final Future<void> Function(BookMeta) onDelete;
 
   /// 是否处于批量选择模式
   final bool selecting;
@@ -807,7 +786,6 @@ class _BookGrid extends StatelessWidget {
           book: book,
           onOpen: onOpen,
           onChanged: onChanged,
-          onDelete: onDelete,
           selecting: selecting,
           selected: selected.contains(book.id),
           onStartSelect: onStartSelect,
@@ -836,7 +814,6 @@ class _BookCard extends StatelessWidget {
     required this.book,
     required this.onOpen,
     required this.onChanged,
-    required this.onDelete,
     required this.onStartSelect,
     required this.onToggleSelect,
     this.selecting = false,
@@ -846,7 +823,6 @@ class _BookCard extends StatelessWidget {
   final BookMeta book;
   final Future<void> Function(BookMeta) onOpen;
   final Future<void> Function() onChanged;
-  final Future<void> Function(BookMeta) onDelete;
   final void Function(BookMeta) onStartSelect;
   final void Function(BookMeta) onToggleSelect;
   final bool selecting;
@@ -874,45 +850,23 @@ class _BookCard extends StatelessWidget {
                   borderRadius: BorderRadius.circular(10),
                   child: _Thumbnail(book: book, app: app),
                 ),
-                // 单本操作入口（重命名 / 收藏 / 信息 / 删除）。
-                //
-                // 长按卡片已经被"批量选择"占用了，所以单本菜单必须
-                // 另给一个入口，否则重命名、删除单本这些老功能就没了。
-                // 只在非选择模式显示，避免和选中标记打架。
-                if (!selecting)
-                  Positioned(
-                    top: 2,
-                    left: 2,
-                    child: Material(
-                      color: Colors.black.withValues(alpha: 0.32),
-                      shape: const CircleBorder(),
-                      child: InkWell(
-                        customBorder: const CircleBorder(),
-                        onTap: () => _showActions(context, app),
-                        child: const Padding(
-                          padding: EdgeInsets.all(3),
-                          child: Icon(Icons.more_horiz,
-                              size: 16, color: Colors.white),
-                        ),
-                      ),
-                    ),
-                  ),
                 // 选中标记
-                if (selecting)
+                //
+                // 只保留选中态：实心圆 + 勾选。未选中不显示圆圈，
+                // 避免外圈与空心圆叠加出的"同心圆"干扰卡片画面。
+                if (selecting && selected)
                   Positioned(
                     top: 4,
                     right: 4,
                     child: Container(
                       decoration: BoxDecoration(
-                        color: selected
-                            ? theme.colorScheme.primary
-                            : Colors.black.withValues(alpha: 0.35),
+                        color: theme.colorScheme.primary,
                         shape: BoxShape.circle,
                         border: Border.all(color: Colors.white, width: 1.5),
                       ),
                       padding: const EdgeInsets.all(2),
-                      child: Icon(
-                        selected ? Icons.check : Icons.circle_outlined,
+                      child: const Icon(
+                        Icons.check,
                         size: 16,
                         color: Colors.white,
                       ),
@@ -958,110 +912,8 @@ class _BookCard extends StatelessWidget {
         BookKind.doc => '文档',
       };
 
-  Future<void> _showActions(BuildContext context, AppState app) async {
-    final action = await showModalBottomSheet<String>(
-      context: context,
-      builder: (ctx) => SafeArea(
-        child: Column(
-          mainAxisSize: MainAxisSize.min,
-          children: [
-            ListTile(
-              leading: const Icon(Icons.edit_outlined),
-              title: const Text('重命名'),
-              onTap: () => Navigator.of(ctx).pop('rename'),
-            ),
-            ListTile(
-              leading: Icon(book.isFavorite ? Icons.star : Icons.star_border),
-              title: Text(book.isFavorite ? '取消收藏' : '收藏'),
-              onTap: () => Navigator.of(ctx).pop('favorite'),
-            ),
-            ListTile(
-              leading: const Icon(Icons.info_outline),
-              title: const Text('详情'),
-              onTap: () => Navigator.of(ctx).pop('info'),
-            ),
-            ListTile(
-              leading:
-                  const Icon(Icons.delete_outline, color: Colors.redAccent),
-              title:
-                  const Text('删除', style: TextStyle(color: Colors.redAccent)),
-              onTap: () => Navigator.of(ctx).pop('delete'),
-            ),
-          ],
-        ),
-      ),
-    );
-
-    if (action == null) return;
-
-    // showModalBottomSheet 是 async gap：之后再用 context 必须先确认还挂载着
-    if (!context.mounted) return;
-
-    switch (action) {
-      case 'rename':
-        if (!context.mounted) return;
-        final controller = TextEditingController(text: book.title);
-        final name = await showDialog<String>(
-          context: context,
-          builder: (ctx) => AlertDialog(
-            title: const Text('重命名'),
-            content: TextField(controller: controller, autofocus: true),
-            actions: [
-              TextButton(
-                  onPressed: () => Navigator.of(ctx).pop(),
-                  child: const Text('取消')),
-              FilledButton(
-                  onPressed: () => Navigator.of(ctx).pop(controller.text),
-                  child: const Text('保存')),
-            ],
-          ),
-        );
-        if (name != null && name.trim().isNotEmpty) {
-          await app.rename(book.id, name.trim());
-          await onChanged();
-        }
-      case 'favorite':
-        await app.toggleFavorite(book.id);
-        await onChanged();
-      case 'info':
-        final size = await app.store.sizeOfBook(book.id);
-        if (!context.mounted) return;
-        await showDialog<void>(
-          context: context,
-          builder: (ctx) => AlertDialog(
-            title: Text(book.title),
-            content: Column(
-              mainAxisSize: MainAxisSize.min,
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                Text('页数：${book.pageCount}'),
-                Text('章节：${book.chapterCount}'),
-                Text('类型：${_kindLabel(book.kind)}'),
-                Text('占用：${ByteStore.humanSize(size)}'),
-                Text('导入时间：${_fmt(book.importedAt)}'),
-                Text(
-                    '最近阅读：${book.lastReadAt == null ? '从未' : _fmt(book.lastReadAt!)}'),
-                if (book.description != null) ...[
-                  const SizedBox(height: 8),
-                  Text(book.description!, style: const TextStyle(fontSize: 12)),
-                ],
-              ],
-            ),
-            actions: [
-              TextButton(
-                  onPressed: () => Navigator.of(ctx).pop(),
-                  child: const Text('关闭')),
-            ],
-          ),
-        );
-      case 'delete':
-        await onDelete(book);
-    }
-  }
-
-  static String _fmt(DateTime d) =>
-      '${d.year}-${d.month.toString().padLeft(2, '0')}-${d.day.toString().padLeft(2, '0')} '
-      '${d.hour.toString().padLeft(2, '0')}:${d.minute.toString().padLeft(2, '0')}';
+  // 卡片上的单本操作（重命名 / 详情等）随「更多」菜单一并移除：
+  // 长按进入批量管理后，收藏与删除都在批量管理栏完成。
 }
 
 /// 封面缩略图。没有封面时显示一个按书名哈希配色的占位。

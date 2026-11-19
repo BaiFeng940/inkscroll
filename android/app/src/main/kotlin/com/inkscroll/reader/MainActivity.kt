@@ -39,10 +39,10 @@ class MainActivity : FlutterActivity() {
                             result.success(true)
                         }
                     }
-                    // 高刷档位：standard120 / max / system
+                    // 高刷档位：sixty（60 帧）/ max（最高帧率）
                     //（旧实现写死 ≤120Hz，144Hz 设备被压到 60Hz）
                     "setRefreshMode" -> {
-                        refreshRate?.setTarget(call.argument<String>("mode") ?: "standard120")
+                        refreshRate?.setTarget(call.argument<String>("mode") ?: "max")
                         result.success(true)
                     }
                     else -> result.notImplemented()

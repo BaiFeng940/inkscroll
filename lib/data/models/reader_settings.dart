@@ -92,14 +92,19 @@ extension PageTurnAnimX on PageTurnAnim {
 
 /// 屏幕刷新率策略。
 ///
-/// 旧实现写死"≤120Hz 的最大档"，144Hz 设备会被压到 60Hz；现在交给用户选。
-enum HighRefreshMode { standard120, max, system }
+/// 只保留两档：**60 帧**（省电，流畅度对阅读足够）与**最高帧率**
+///（把屏幕能跑的最高刷新率跑满）。
+///
+/// 旧版本曾有的「标准 120 / 跟随系统」两档已移除：
+/// 「标准 120」对 144Hz 设备既不是 60 也不是最高，属于中间态；
+/// 「跟随系统」在国产 ROM 上等同 60 帧（应用不主动声明就按 60 处理），
+/// 与「60 帧」档效果一致，只是绕了一圈。两者都归并掉。
+enum HighRefreshMode { sixty, max }
 
 extension HighRefreshModeX on HighRefreshMode {
   String get label => switch (this) {
-        HighRefreshMode.standard120 => '标准（最高 120Hz）',
-        HighRefreshMode.max => '拉满（用屏幕最高档）',
-        HighRefreshMode.system => '跟随系统',
+        HighRefreshMode.sixty => '60 帧',
+        HighRefreshMode.max => '最高帧率',
       };
 }
 
@@ -115,7 +120,7 @@ class ReaderSettings {
     this.screenBrightness = 1.0,
     this.keepScreenOn = true,
     this.pageTurnAnim = PageTurnAnim.normal,
-    this.highRefreshMode = HighRefreshMode.standard120,
+    this.highRefreshMode = HighRefreshMode.max,
     this.reserveTopInset = true,
     this.themeMode = ThemeMode.system,
     this.lastModePerBook = const {},
@@ -139,7 +144,7 @@ class ReaderSettings {
   /// 翻页/跳转动画档位（关 / 快 / 标准）
   final PageTurnAnim pageTurnAnim;
 
-  /// 高刷档位策略（标准 120 / 拉满 / 跟随系统）
+  /// 高刷档位策略（60 帧 / 最高帧率）
   final HighRefreshMode highRefreshMode;
 
   /// 竖屏翻页时在页面上方预留系统栏/挖孔高度，
@@ -228,8 +233,7 @@ class ReaderSettings {
       keepScreenOn: json['keepScreenOn'] as bool? ?? true,
       pageTurnAnim: _enumByName(
           PageTurnAnim.values, json['pageTurnAnim'], PageTurnAnim.normal),
-      highRefreshMode: _enumByName(HighRefreshMode.values,
-          json['highRefreshMode'], HighRefreshMode.standard120),
+      highRefreshMode: _refreshModeFromName(json['highRefreshMode']),
       reserveTopInset: json['reserveTopInset'] as bool? ?? true,
       themeMode:
           _enumByName(ThemeMode.values, json['themeMode'], ThemeMode.system),
@@ -260,6 +264,26 @@ class ReaderSettings {
       }
     }
     return ReadingMode.verticalContinuous;
+  }
+
+  /// 解析刷新率档位，**兼容旧值**。
+  ///
+  /// 旧版本存的是 `standard120` / `system`：standard120 是高刷偏好，
+  /// 归入「最高帧率」；system 是"不主动声明"，与「60 帧」等效，
+  /// 归入「60 帧」。直接按名字匹配会让老用户掉回默认，丢失原偏好。
+  static HighRefreshMode _refreshModeFromName(Object? name) {
+    if (name is String) {
+      switch (name) {
+        case 'sixty':
+          return HighRefreshMode.sixty;
+        case 'max':
+        case 'standard120': // 旧：标准（最高 120Hz）
+          return HighRefreshMode.max;
+        case 'system': // 旧：跟随系统
+          return HighRefreshMode.sixty;
+      }
+    }
+    return HighRefreshMode.max;
   }
 
   ThemeData themeData({required Brightness brightness}) {

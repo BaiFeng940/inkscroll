@@ -49,8 +49,8 @@
 ### 高刷新率
 
 原生两层适配：窗口显示模式（`preferredDisplayModeId`，锁定分辨率选档）+ 首帧后
-`Surface.setFrameRate(120, FIXED_SOURCE)`。**刷新率档位可在设置里选**：标准（最高 120Hz）/
-拉满（用屏幕最高档，144Hz 设备不再被压到 60Hz）/ 跟随系统。
+`Surface.setFrameRate(120, FIXED_SOURCE)`。**刷新率档位可在设置里选**：
+**60 帧**（省电，阅读足够）/ **最高帧率**（用屏幕能跑的最高档，144Hz 设备不再被压到 60Hz）。
 Dart 侧配套节流：进度通知万分位、预览 70ms、度量回填帧内合并。
 
 ### PDF 与加密压缩包

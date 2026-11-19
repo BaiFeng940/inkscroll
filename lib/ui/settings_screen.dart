@@ -265,9 +265,8 @@ class _SettingsScreenState extends State<SettingsScreen> {
   static const String _autoValue = '__auto__';
 
   String _refreshLabel(HighRefreshMode m) => switch (m) {
-        HighRefreshMode.standard120 => '标准（最高 120Hz）',
-        HighRefreshMode.max => '拉满（用屏幕最高档，如 144Hz）',
-        HighRefreshMode.system => '跟随系统（不主动申请）',
+        HighRefreshMode.sixty => '60 帧（省电，阅读完全够用）',
+        HighRefreshMode.max => '最高帧率（用屏幕能跑的最高档，如 144Hz）',
       };
 
   /// 屏幕刷新率档位选择。
@@ -290,7 +289,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
                         TextStyle(fontSize: 17, fontWeight: FontWeight.w600)),
               ),
             ),
-            for (final m in HighRefreshMode.values)
+            for (final m in const [HighRefreshMode.sixty, HighRefreshMode.max])
               ListTile(
                 leading: const Icon(Icons.speed_outlined),
                 title: Text(_refreshLabel(m)),
@@ -323,7 +322,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
   }
 
   /// 高刷白名单说明（各机型路径）。原来是刷新率 Tile 的 onTap，
-  /// 现在作为档位选择面板里的"为什么可能还是 60Hz"入口。
+  /// 现在作为档位选择面板里的「为什么可能还是 60Hz？」入口。
   void _showRefreshInfo() {
     _showInfo(
       title: '屏幕刷新率',
@@ -365,6 +364,15 @@ class _SettingsScreenState extends State<SettingsScreen> {
             onTap: () => _pickTheme(app),
           ),
 
+          // 屏幕刷新率是显示偏好，与主题一起归在「外观」下
+          ListTile(
+            leading: const Icon(Icons.speed),
+            title: const Text('屏幕刷新率档位'),
+            subtitle: Text(_refreshLabel(app.settings.highRefreshMode)),
+            trailing: const Icon(Icons.chevron_right),
+            onTap: () => _pickRefreshMode(app),
+          ),
+
           const Divider(height: 24),
 
           // ── 阅读 ──
@@ -377,45 +385,9 @@ class _SettingsScreenState extends State<SettingsScreen> {
             onTap: () => _pickDefaultMode(app),
           ),
 
-          // ── 屏幕刷新率档位 ──
-          ListTile(
-            leading: const Icon(Icons.speed),
-            title: const Text('屏幕刷新率档位'),
-            subtitle: Text(_refreshLabel(app.settings.highRefreshMode)),
-            trailing: const Icon(Icons.chevron_right),
-            onTap: () => _pickRefreshMode(app),
-          ),
-
           const Divider(height: 24),
 
-          // ── 屏幕刷新率 ──
-          ListTile(
-            leading: const Icon(Icons.speed_outlined),
-            title: const Text('屏幕刷新率'),
-            subtitle: const Text('想跑满 120Hz，需要你在系统设置里加白名单'),
-            trailing: const Icon(Icons.chevron_right),
-            onTap: () => _showInfo(
-              title: '屏幕刷新率',
-              body: 'inkScroll 会主动向系统申请高刷新率，但 Android 默认只给'
-                  '系统允许列表里的应用开高刷。\n\n'
-                  '需要你手动把本应用加进去：\n'
-                  '打开 系统设置 → 显示与亮度 → 屏幕刷新率，'
-                  '找到「使用高刷新率的应用」（有的机型叫「高刷新率应用列表」'
-                  '或「选择应用」），把 inkScroll 打开。\n\n'
-                  '常见机型位置：\n'
-                  '· vivo / iQOO：设置 → 显示与亮度 → 屏幕刷新率 → '
-                  '使用高刷新率的应用\n'
-                  '· OPPO / 一加：设置 → 显示与亮度 → 屏幕刷新率 → 选择应用\n'
-                  '· 小米 / Redmi：设置 → 显示 → 高刷新率 → 应用列表\n'
-                  '· 华为 / 荣耀：设置 → 显示与亮度 → 屏幕刷新率\n\n'
-                  '找不到这个选项也不影响使用：不动它照样能正常看书，'
-                  '只是滑动可能停在 60Hz。系统不允许应用自己绕过这个限制。',
-            ),
-          ),
-
-          const Divider(height: 24),
-
-          // ── 压缩包 ──
+          _SectionHeader('导入'),
           ListTile(
             leading: const Icon(Icons.folder_zip_outlined),
             title: const Text('压缩包导入说明'),
@@ -485,6 +457,16 @@ class _SettingsScreenState extends State<SettingsScreen> {
               style:
                   TextStyle(fontSize: 11, height: 1.5, color: theme.hintColor),
             ),
+          ),
+          ListTile(
+            leading: const Icon(Icons.storage_outlined),
+            title: const Text('缓存说明'),
+            subtitle: const Text(
+              '从网盘看过的页会自动缓存到本地，断网也能看已缓存的；'
+              '删除某本在线书时缓存一并清除。',
+              style: TextStyle(fontSize: 12),
+            ),
+            isThreeLine: true,
           ),
 
           const Divider(height: 24),
@@ -632,16 +614,6 @@ class _SettingsScreenState extends State<SettingsScreen> {
             //   现在 test/app_version_test.dart 会检查这里不许再出现写死的版本号。
             subtitle: Text('版本 $kAppVersion · 本地与网盘漫画阅读器\n'
                 '不收集任何数据；只有你主动连接网盘时才有网络请求'),
-            isThreeLine: true,
-          ),
-          ListTile(
-            leading: const Icon(Icons.storage_outlined),
-            title: const Text('缓存说明'),
-            subtitle: const Text(
-              '从网盘看过的页会自动缓存到本地，断网也能看已缓存的；'
-              '删除某本在线书时缓存一并清除。',
-              style: TextStyle(fontSize: 12),
-            ),
             isThreeLine: true,
           ),
         ],

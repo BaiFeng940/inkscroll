@@ -21,7 +21,8 @@ class DisplayChannel {
     }
   }
 
-  /// 设置高刷档位：standard120 / max / system（见 ReaderSettings.highRefreshMode）。
+  /// 设置高刷档位：sixty（60 帧）/ max（最高帧率）
+  /// （见 ReaderSettings.highRefreshMode）。
   ///
   /// 旧实现写死"≤120Hz 的最大档"，144Hz 设备被压到 60Hz；现在交给用户选。
   static Future<void> setRefreshMode(String mode) async {

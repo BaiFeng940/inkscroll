@@ -141,7 +141,7 @@ android/           MainActivity.kt · SafFolderPlugin.kt · RefreshRateControlle
 1. **窗口显示模式**：onCreate 即设 `preferredDisplayModeId`（锁定分辨率选刷新率档，
    避免连带降分辨率），onResume / onWindowFocusChanged 反复补设；
 2. **Surface 声明**：首帧渲染后 `Surface.setFrameRate(120, FIXED_SOURCE)`（遍历找 FlutterSurfaceView）；
-3. **档位交给用户**：standard120 / max / system 三档（`ReaderSettings.highRefreshMode`），
+3. **档位交给用户**：sixty / max 两档（`ReaderSettings.highRefreshMode`），
    Dart 侧经 `inkscroll/display` 通道下发，启动与应用时生效。
 
 ## 10. 原生插件（4 个自研 Kotlin）
