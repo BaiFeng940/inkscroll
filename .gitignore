@@ -68,6 +68,14 @@ android/app/.cxx/
 
 # 本地验证截图（体积大且与源码无关）
 dist/verification/
+_shot/
+
+# 本地调试产物：线程栈转储、临时 gradle 脚本、测试用 base64 样本
+jstack*.txt
+stack-*.txt
+mirror-init.gradle
+test/_*.b64
+android/build/
 
 # 系统 / 编辑器
 Thumbs.db

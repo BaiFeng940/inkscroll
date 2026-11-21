@@ -43,6 +43,7 @@ import 'dart:async';
 import 'dart:typed_data';
 
 import 'package:flutter/material.dart';
+import 'package:flutter/rendering.dart';
 
 import '../../../core/errors.dart';
 import '../../../core/image_header.dart';
@@ -65,6 +66,8 @@ class PageImage extends StatefulWidget {
     required this.resolver,
     this.layoutMode = PageLayoutMode.intrinsic,
     this.onDimensionResolved,
+    this.knownHeight,
+    this.onHeightResolved,
     this.maxRetries = 3,
   });
 
@@ -80,6 +83,22 @@ class PageImage extends StatefulWidget {
   /// 让百分比显示的误差尽快收敛。
   final void Function(ImageDimension dim)? onDimensionResolved;
 
+  /// 已解码页的已知真实布局高度（长页模式占位用）。
+  ///
+  /// SliverList 回收重建时，占位若用嗅探估算比例，高度不一致会造成
+  /// 「占位高 → 真实高」跳变；用这里传入的真实高度则无跳变。
+  /// null = 该页还没解码过（退化到嗅探估算）。
+  final double? knownHeight;
+
+  /// 该页的布局高度确定或变化时回调（仅长页模式）。
+  ///
+  /// 首次测量 oldHeight 为 null（只是记录，不补偿）；
+  /// 之后的 oldHeight → newHeight 变化正是「占位 ↔ 真实」的跳变时刻，
+  /// UI 层用它做滚动位置补偿，让正在看的内容纹丝不动。
+  /// boxTop 是页顶相对屏幕顶的 Y 坐标（沉浸式下 ≈ 视口顶）。
+  final void Function(String pageId, double? oldHeight, double newHeight,
+      double boxTop)? onHeightResolved;
+
   final int maxRetries;
 
   @override
@@ -93,6 +112,10 @@ class _PageImageState extends State<PageImage> {
   int _attempt = 0;
   Timer? _retryTimer;
   bool _reportedDimension = false;
+
+  /// 高度追踪的代际标记：页 id 变化时换新，迫使 [_HeightTracker]
+  /// 重新从占位高度开始，不会把上一页的高度当成这一页的基线。
+  Object _heightTrackerKey = Object();
 
   /// 解码宽度上限。
   ///
@@ -130,6 +153,7 @@ class _PageImageState extends State<PageImage> {
       _error = null;
       _bytes = null;
       _reportedDimension = false;
+      _heightTrackerKey = Object(); // 页换了：高度追踪从零开始
       _load();
     }
   }
@@ -213,6 +237,14 @@ class _PageImageState extends State<PageImage> {
       if (widget.layoutMode == PageLayoutMode.fitViewport) {
         return const SizedBox.expand(child: _LoadingPlaceholder());
       }
+      if (widget.knownHeight != null &&
+          widget.knownHeight!.isFinite &&
+          widget.knownHeight! > 0) {
+        // 解码过的页：占位直接用真实高度，回收重建零跳变。
+        // （比嗅探估算更准，必须排在 AspectRatio 之前。）
+        return SizedBox(
+            height: widget.knownHeight, child: const _LoadingPlaceholder());
+      }
       final ar = widget.page.aspectRatio;
       if (ar != null && ar.isFinite && ar > 0.02 && ar < 50) {
         return AspectRatio(
@@ -276,13 +308,23 @@ class _PageImageState extends State<PageImage> {
     // 页面内容渐入：解码完成 0 → 1（200ms），替代"突然出现"。
     // key 绑定页 id：换页时占位 → 图片是新元素，动画重新走一遍；
     // 同一页的重建（setState / 父级 rebuild）不会重启动画。
-    return TweenAnimationBuilder<double>(
+    final Widget result = TweenAnimationBuilder<double>(
       key: ValueKey(widget.page.id),
       tween: Tween(begin: 0.0, end: 1.0),
       duration: const Duration(milliseconds: 200),
       curve: Curves.easeOut,
       builder: (ctx, v, child) => Opacity(opacity: v, child: child),
       child: content,
+    );
+
+    // 长页模式：追踪本页布局高度（含占位 → 真实的跳变），供 UI 层做
+    // 滚动位置补偿；翻页模式页高固定一屏，没有这个需求。
+    if (widget.layoutMode != PageLayoutMode.intrinsic) return result;
+    return _HeightTracker(
+      generation: _heightTrackerKey,
+      onHeight: (oldH, newH, boxTop) =>
+          widget.onHeightResolved?.call(widget.page.id, oldH, newH, boxTop),
+      child: result,
     );
   }
 }
@@ -373,5 +415,120 @@ class _ErrorPlaceholder extends StatelessWidget {
         ),
       ),
     );
+  }
+}
+
+/// 长页模式下追踪本页布局高度的变化。
+///
+/// ## 为什么需要它
+///
+/// 长页模式（上下滑动）用 `SliverList`，每页**没有固定高度**：
+/// 占位阶段用导入时嗅探的 aspectRatio，解码后换成图片真实比例。
+/// 两者不一致时，页高会在解码那一刻跳变。
+///
+/// 跳变的后果不是「这一页变高变矮」这么简单：
+/// 视口**上方**的页一旦变高，视口内所有内容被整体顶走 —— 用户正在看的内容
+/// 凭空移动；而 Flutter 的滚动位置是绝对像素值，SliverList 不会替你补偿。
+/// 表现就是：画面自己往前翻 / 怎么划都闪回同一页。
+///
+/// ## 它做什么
+///
+/// 每帧布局后量一次自身高度与页面顶部位置：
+///   - 第一次：oldHeight = null，只建立基线（无跳变，UI 层只记录不补偿）；
+///   - 之后：oldHeight → newHeight 就是一次真实的「占位 ↔ 真实」跳变，
+///     通过 [onHeight] 交给 UI 层做滚动位置补偿。
+///
+/// 回调在帧末（postFrame）触发，回调内可以安全地做 jumpTo。
+class _HeightTracker extends StatefulWidget {
+  const _HeightTracker({
+    required this.generation,
+    required this.onHeight,
+    required this.child,
+  });
+
+  /// 页代际标记：变化即表示换页，基线重新开始。
+  final Object generation;
+
+  final void Function(
+      double? oldHeight, double newHeight, double boxTop) onHeight;
+
+  final Widget child;
+
+  @override
+  State<_HeightTracker> createState() => _HeightTrackerState();
+}
+
+class _HeightTrackerState extends State<_HeightTracker> {
+  double? _lastHeight;
+
+  @override
+  void didUpdateWidget(covariant _HeightTracker old) {
+    super.didUpdateWidget(old);
+    if (!identical(old.generation, widget.generation)) {
+      _lastHeight = null;
+    }
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return _MeasuredSize(
+      onSize: (size, boxTop) {
+        final h = size.height;
+        if (!h.isFinite || h <= 0) return;
+        final old = _lastHeight;
+        if (old == null) {
+          _lastHeight = h;
+          // 首次基线：此时可能还是占位高度，不记录不补偿。
+          widget.onHeight(null, h, boxTop);
+          return;
+        }
+        if ((old - h).abs() < 0.5) return;
+        _lastHeight = h;
+        widget.onHeight(old, h, boxTop);
+      },
+      child: widget.child,
+    );
+  }
+}
+
+/// 测量子控件的尺寸与页面顶部位置，变化时在帧末回调。
+class _MeasuredSize extends SingleChildRenderObjectWidget {
+  const _MeasuredSize({required this.onSize, required super.child});
+
+  final void Function(Size size, double boxTopDy) onSize;
+
+  @override
+  RenderObject createRenderObject(BuildContext context) =>
+      _RenderMeasuredSize(onSize);
+
+  @override
+  void updateRenderObject(
+      BuildContext context, _RenderMeasuredSize renderObject) {
+    renderObject.onSize = onSize;
+  }
+}
+
+class _RenderMeasuredSize extends RenderProxyBox {
+  _RenderMeasuredSize(this.onSize);
+
+  void Function(Size size, double boxTopDy) onSize;
+
+  Size _lastReported = Size.zero;
+  bool _scheduled = false;
+
+  @override
+  void performLayout() {
+    super.performLayout();
+    if (_lastReported == size) return;
+    _lastReported = size;
+    if (_scheduled) return;
+    _scheduled = true;
+    // 布局阶段不能直接回调（回调里可能 jumpTo）→ 推到帧末。
+    // 回调里读的是当时的 size / 位置，一帧内多次变化自动合并。
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      _scheduled = false;
+      if (!attached || !hasSize) return;
+      onSize(size, localToGlobal(Offset.zero).dy);
+    });
   }
 }

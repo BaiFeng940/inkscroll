@@ -358,7 +358,14 @@ class _HomeScreenState extends State<HomeScreen>
           book: book,
           settings: app.settings,
           prefs: app.prefsForReader,
-          resolveDocument: () => app.buildDocument(book),
+          // ★ 用**最新**的书架元数据：密码可能刚在阅读器里补填过。
+          resolveDocument: () =>
+              app.buildDocument(app.bookById(book.id) ?? book),
+          onArchivePasswordSubmit: (pwd) =>
+              app.applyArchivePassword(book.id, pwd),
+          // 密码验证成功（开书成功）后自动加入密码字典 ——
+          // 用户不用再去设置里手动添加。
+          onArchivePasswordAccepted: (pwd) => app.addZipPassword(pwd),
           extraction: app.extraction,
           store: app.store,
           onSettingsChanged: (s) {
@@ -513,6 +520,50 @@ class _HomeScreenState extends State<HomeScreen>
         },
         child: Column(
         children: [
+          // ── 导入进度横幅（网盘库导入/单本导入时显示，完成后自动消失）──
+          //   AppState.importProgress 只在状态里，从没被任何 UI 消费过 ——
+  //   用户只能干等。这里挂一张非阻塞横幅：进度条 + 当前步骤文字。
+          if (app.importProgress != null)
+            Material(
+              color: theme.colorScheme.surfaceContainerHighest
+                  .withValues(alpha: 0.55),
+              child: Padding(
+                padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+                child: Row(
+                  children: [
+                    const SizedBox(
+                      width: 18,
+                      height: 18,
+                      child: CircularProgressIndicator(strokeWidth: 2),
+                    ),
+                    const SizedBox(width: 12),
+                    Expanded(
+                      child: Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        mainAxisSize: MainAxisSize.min,
+                        children: [
+                          Text(
+                            app.importProgress!.label,
+                            maxLines: 1,
+                            overflow: TextOverflow.ellipsis,
+                            style: const TextStyle(fontSize: 12),
+                          ),
+                          const SizedBox(height: 4),
+                          ClipRRect(
+                            borderRadius: BorderRadius.circular(4),
+                            child: LinearProgressIndicator(
+                              value: app.importProgress!.ratio
+                                  .clamp(0.0, 1.0),
+                              minHeight: 4,
+                            ),
+                          ),
+                        ],
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+            ),
           // ── 顶部：搜索框 + 设置（批量选择时换成选择栏）──
           if (_selecting)
             _buildSelectionBar(app, topPad)

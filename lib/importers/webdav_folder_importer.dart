@@ -139,7 +139,10 @@ class WebDavFolderImporter implements Importer {
   ///
   /// 原来是一个接一个 PROPFIND —— 走公网隧道时 RTT 有几十到几百毫秒，
   /// 100 个文件夹就是纯等几十秒。并行 5 路能把这部分压到 1/5。
-  static const int scanConcurrency = 5;
+  /// 顶层目录扫描的并发路数。与导入 worker 池（8）对齐：
+  /// 扫描阶段全是 PROPFIND 往返，网盘并发承受度与导入阶段相同，
+  /// 压到 5 只会让大库的首屏扫描白白多等一轮。
+  static const int scanConcurrency = 8;
 
   /// 递归列目录的最大深度（漫画一般就是一层，留点余量）
   static const int maxDepth = 3;
@@ -542,18 +545,71 @@ class WebDavFolderImporter implements Importer {
   /// 往返延迟直接累加；这里并发 4，配合连接池 12 刚好不排队。
   static const int nestedScanConcurrency = 4;
 
+  /// 合集名清洗：去掉「合集」二字，再把**前后**成对的各类括号组剥掉。
+  ///
+  /// 例：`（XX）合集` → `XX`；`【XX】合集（完）` → `XX`；`XX合集[01-99]` → `XX`。
+  /// 规则：
+  ///   1. 先去掉「合集」二字；
+  ///   2. 反复剥掉尾随/开头的**完整成对**括号组（最多 3 轮），
+  ///      只剥完整对，避免把「XX（全）」这种撕成残缺文本；
+  ///   3. 剥完为空则回退原名（目录就叫「合集」时不误删成空）。
+  ///
+  /// 支持的括号：全角/半角圆括号、方括号、花括号、书名号、直角/单双引号角标。
+  static String stripCollectionMarkers(String raw) {
+    final fallback = raw.trim();
+    var s = raw.replaceAll('合集', '').trim();
+    const opens = ['（', '(', '「', '『', '【', '[', '《', '〔', '｛', '{'];
+    const closes = ['）', ')', '」', '』', '】', ']', '》', '〕', '｝', '}'];
+
+    // 尾随括号组：`XX（完）` → `XX`（组内非空才剥）
+    String? stripTrailingGroup(String t) {
+      for (var i = 0; i < closes.length; i++) {
+        if (t.endsWith(closes[i])) {
+          final start = t.lastIndexOf(opens[i]);
+          if (start > 0) {
+            final inner = t.substring(start + 1, t.length - 1);
+            if (inner.trim().isNotEmpty) return t.substring(0, start).trim();
+          }
+        }
+      }
+      return null;
+    }
+
+    // 开头括号组：仅当**整串**就是这一组时整组摘除（`【XX】（完）` 先剥尾组再剥头组）
+    String? stripLeadingGroup(String t) {
+      for (var i = 0; i < opens.length; i++) {
+        if (t.startsWith(opens[i])) {
+          final end = t.indexOf(closes[i]);
+          if (end == t.length - 1) {
+            final inner = t.substring(1, end).trim();
+            if (inner.isNotEmpty) return inner;
+          }
+        }
+      }
+      return null;
+    }
+
+    for (var round = 0; round < 3; round++) {
+      final before = s;
+      s = stripTrailingGroup(s) ?? s;
+      s = stripLeadingGroup(s) ?? s;
+      if (s == before || s.isEmpty) break;
+    }
+    return s.isEmpty ? fallback : s;
+  }
+
   /// 合集里的一本书该叫什么名字。
   ///
   /// 现实命名：`漫画根目录/XX合集/第一话/`。只取「第一话」的话，库里有
   /// 几十本「第一话」「第二话」，完全分不清谁是谁。规则：
-  ///   1. 合集名去掉「合集」二字（它只是分类标记，不是书名的一部分）；
+  ///   1. 合集名走 [stripCollectionMarkers]：去「合集」+ 剥前后括号组；
   ///   2. 拼成 `合集名 子名`；
   ///   3. 子名如果已经以合集名开头（重复部分），不重复拼接；
   ///   4. 压缩包去掉扩展名。
   ///
-  /// 例：`XX合集` + `第一话` → `XX 第一话`
+  /// 例：`（XX）合集` + `第一话` → `XX 第一话`
   static String collectionBookName(String collection, String sub) {
-    final c = collection.replaceAll('合集', '').trim();
+    final c = stripCollectionMarkers(collection);
     if (c.isEmpty) return _stripArchiveExt(sub);
     final s = _stripArchiveExt(sub);
     if (s.startsWith(c)) return s;
@@ -572,10 +628,10 @@ class WebDavFolderImporter implements Importer {
 
   /// 合并合集之后，**整本书**叫什么名字。
   ///
-  /// 只去掉「合集」二字：它只是分类标记，不是书名的一部分。
-  /// 例：`XX合集` → `XX`。去掉之后空了（目录就叫「合集」）则原样保留。
+  /// 走 [stripCollectionMarkers]：去「合集」二字 + 剥前后括号组。
+  /// 例：`XX合集` → `XX`；`（XX）合集` → `XX`。剥完为空（目录就叫「合集」）则原样保留。
   static String collectionTitle(String collection) {
-    final c = collection.replaceAll('合集', '').trim();
+    final c = stripCollectionMarkers(collection);
     return c.isEmpty ? collection.trim() : c;
   }
 

@@ -1057,6 +1057,76 @@ class AppState extends ChangeNotifier {
   // ------------------------------------------------------------------
   // 文档装载：从 document.json 读，读不到就重新解析
   // ------------------------------------------------------------------
+
+  /// 按 id 查最新书架元数据（书源密码等字段可能刚被阅读器补填过）。
+  BookMeta? bookById(String id) {
+    final i = books.indexWhere((b) => b.id == id);
+    return i < 0 ? null : books[i];
+  }
+
+  /// 取一本书**最新**的压缩包书源（拿不到则回退传入的快照）。
+  ArchiveSourceSpec _freshArchiveSpec(BookMeta book) {
+    final fresh = bookById(book.id) ?? book;
+    final src = fresh.source;
+    return src is ArchiveSourceSpec ? src : book.source as ArchiveSourceSpec;
+  }
+
+  /// 阅读器里补填压缩包密码：验证通过后写回书源（下次打开直接可用）。
+  /// 返回 false = 密码不正确（书源不变，阅读器会重新弹窗）。
+  Future<bool> applyArchivePassword(String bookId, String password) async {
+    final b = bookById(bookId);
+    if (b == null) return false;
+    final src = b.source;
+    if (src is! ArchiveSourceSpec) return false;
+
+    // ── 验证：用新密码开包并试读第一个加密条目（≤1KB）──
+    //   错密码只有真的解一次才知道：中央目录不加密，条目数据才加密。
+    final probe = await _probeArchivePassword(src.path, password);
+    if (!probe) return false;
+
+    final meta = BookMeta(
+      id: b.id,
+      title: b.title,
+      kind: b.kind,
+      source: ArchiveSourceSpec(
+          path: src.path, format: src.format, password: password),
+      pageCount: b.pageCount,
+      chapterCount: b.chapterCount,
+      importedAt: b.importedAt,
+      coverPath: b.coverPath,
+      author: b.author,
+      isFavorite: b.isFavorite,
+      lastReadAt: b.lastReadAt,
+      description: b.description,
+    );
+    await _prefs.upsertBook(meta);
+    books = _prefs.loadBooks();
+    notifyListeners();
+    return true;
+  }
+
+  /// 用给定密码开包并试读第一个加密条目（≤1KB）。
+  /// 返回 false = 密码不正确；true = 密码可用（或包内没有加密条目）。
+  Future<bool> _probeArchivePassword(String path, String password) async {
+    final src = await FileByteSource.open(path);
+    final z = ZipArchiveSource(src, password: password);
+    try {
+      await z.open();
+      final encrypted =
+          z.entries.where((e) => e.isEncrypted && !e.isDirectory);
+      if (encrypted.isEmpty) return true;
+      await z.readEntry(encrypted.first, maxBytes: 1024);
+      return true;
+    } on ArchivePasswordWrongError {
+      return false;
+    } on ArchivePasswordRequiredError {
+      // AES 等不支持的加密形式也会走到这里
+      return false;
+    } finally {
+      await z.close();
+    }
+  }
+
   Future<({Document document, PageByteResolver resolver})> buildDocument(
     BookMeta book,
   ) async {
@@ -1157,7 +1227,30 @@ class AppState extends ChangeNotifier {
 
       case ArchiveSourceSpec(:final path):
         final src = await FileByteSource.open(path);
-        final ArchiveSource source = await _openArchive(src, path);
+        // ★ 密码以**最新**的书源为准：密码可能在阅读器里刚补填过，
+        //   book 参数是导航时的快照，拿不到刚写入的密码。
+        //   旧版连书源里已存的密码都不传 —— 难怪开带密码的包每次都要
+        //   去设置里手动加字典。
+        final spec = _freshArchiveSpec(book);
+        final ArchiveSource source =
+            await _openArchive(src, path, password: spec.password);
+
+        // 加密包**开书即试读**：密码缺失/错误在这里就暴露，
+        // 让阅读器立刻弹密码框，而不是每页都显示错误占位。
+        // （成本：开书时多读 1KB —— 相比翻页成本可忽略。）
+        if (source is ZipArchiveSource) {
+          final encrypted =
+              source.entries.where((e) => e.isEncrypted && !e.isDirectory);
+          if (encrypted.isNotEmpty) {
+            try {
+              await source.readEntry(encrypted.first, maxBytes: 1024);
+            } on AppError {
+              await source.close();
+              rethrow; // ArchivePasswordRequiredError / ArchivePasswordWrongError
+            }
+          }
+        }
+
         final doc = cached ?? await _rebuildArchiveDocument(book, source, path);
 
         // 解压已经在 prepareBook() 里提前完成（见那里的注释）。

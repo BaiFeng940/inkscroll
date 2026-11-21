@@ -80,6 +80,21 @@ class ReaderController extends ChangeNotifier {
   /// 双击缩放宿主（UI 层注入；null = 无法缩放）
   ReaderZoomHost? zoomHost;
 
+  /// 解码后记录的每页真实布局高度（逻辑像素）。
+  ///
+  /// 长页模式的 SliverList 会回收滚出 cacheExtent 的页：重建时占位若用
+  /// 「导入嗅探」的估算比例，而真实高度与估算不一致，就会出现一次
+  /// 「占位高 → 真实高」的跳变 —— 视口上方的内容被整体顶走，
+  /// 用户看到的就是“画面自己翻页”或“怎么划都闪回”。
+  /// 解码过的页在这里保存真实高度，重建占位直接用，跳变为零。
+  final Map<String, double> knownPageHeights = {};
+
+  double? knownHeightOf(String pageId) => knownPageHeights[pageId];
+
+  void noteKnownPageHeight(String pageId, double height) {
+    if (height.isFinite && height > 0) knownPageHeights[pageId] = height;
+  }
+
   /// 由 UI 层在视口变化时更新（双击缩放的落点换算需要）
   Size? lastViewportSize;
 
@@ -306,6 +321,10 @@ class ReaderController extends ChangeNotifier {
     _converge(r, attempts, animate);
   }
 
+  /// 布局漂移时的等待预算（帧）。60fps 下 12 帧 ≈ 200ms，
+  /// 超时后强制落位，避免跳转永远停在漂移过程中的中间值。
+  static const int _settleFrameBudget = 12;
+
   void _converge(double targetRatio, int attemptsLeft, bool animate) {
     final c = verticalScroll;
     final m = metrics;
@@ -335,7 +354,51 @@ class ReaderController extends ChangeNotifier {
       // 布局后 maxScrollExtent 会变化（真实高度逐渐取代估算）→ 用新值再对一次
       final nowRatio = c2.offset / newMax;
       if ((nowRatio - targetRatio).abs() < 0.005) return; // 已经足够准
+      // 布局仍在大幅漂移（图片在逐页解码）时不追加修正 ——
+      // 此时跳了也会被下一轮漂移拉走，只会反复瞬移（"怎么跳都不准"）。
+      // 但**不能直接放弃**：漂移稳定后没有第二次机会回调，
+      // 进度条跳转会永远停在漂移中的某个中间值（既不收敛也不报错）。
+      // 所以改为「等待漂移停止 + 预算用尽后强制落位」。
+      if ((newMax - maxExtent).abs() > maxExtent * 0.01) {
+        _settle(targetRatio, _settleFrameBudget - 1);
+        return;
+      }
       _converge(targetRatio, attemptsLeft - 1, false);
+    });
+  }
+
+  /// 布局漂移期间只等待、不跳转；漂移停止后回到 [_converge] 继续收敛。
+  /// 预算用尽则按当前最新的 maxScrollExtent 强制落位。
+  void _settle(double targetRatio, int settleLeft) {
+    if (_disposed) return;
+    final c = verticalScroll;
+    if (c == null || !c.hasClients) return;
+    final maxExtent = c.position.maxScrollExtent;
+
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (_disposed) return;
+      final c2 = verticalScroll;
+      if (c2 == null || !c2.hasClients) return;
+      final newMax = c2.position.maxScrollExtent;
+      if (newMax <= 0) return;
+
+      final nowRatio = c2.offset / newMax;
+      if ((nowRatio - targetRatio).abs() < 0.005) return; // 已经足够准
+
+      if ((newMax - maxExtent).abs() > maxExtent * 0.01) {
+        // 还在漂移：继续等（预算内）
+        if (settleLeft > 0) {
+          _settle(targetRatio, settleLeft - 1);
+          return;
+        }
+        // 预算用尽：按最新 maxScrollExtent 强制落位，宁可差一点也别悬着。
+        final forced = (targetRatio * newMax).clamp(0.0, newMax);
+        c2.jumpTo(forced);
+        updateScrollOffset(forced);
+        return;
+      }
+      // 漂移停了：回到收敛流程，按新 maxScrollExtent 再对一次。
+      _converge(targetRatio, 1, false);
     });
   }
 
@@ -348,6 +411,8 @@ class ReaderController extends ChangeNotifier {
     if (chapter.pageIds.isEmpty) return;
     final pageIndex = doc.indexOfPage(chapter.pageIds.first);
     jumpToPage(pageIndex);
+    // 章节是显式切换动作：通知一次，让遮罩里的章节选择器/标题立即刷新。
+    _safeNotify();
   }
 
   void nextPage() {
@@ -545,6 +610,23 @@ class ReaderController extends ChangeNotifier {
 
   /// 按落点执行"上一页 / 下一页"
   void _turnForZone(double x, double leftZoneEnd, double rightZoneStart) {
+    final forward = x >= rightZoneStart;
+    final backward = x < leftZoneEnd;
+
+    // ── 长页模式：侧边区点按 = 平滑滚动约一屏 ──
+    //
+    // 不再调用 jumpToPage 瞬移整页。原因：
+    //   1) 长页是连续流，页与页之间没有"翻页"的语义，瞬移一整页观感突兀；
+    //   2) 更要命的是手势竞技场的规则：位移 < touch slop（约18px）的轻扫
+    //      会被判成 tap —— 用户"快速小滑"想滚动，结果整页瞬移，
+    //      看起来就是"没翻页操作画面自己动了"。
+    // 滚动一屏（90% 视口高，留一点重叠给方向感）与拖动手势同向，
+    // 即使被误判也只是多滚一小段，不会瞬移。
+    if (mode.isVertical) {
+      if (forward || backward) _scrollByViewport(forward ? 1 : -1);
+      return;
+    }
+
     if (x < leftZoneEnd) {
       if (_progress.pageIndex > 0) {
         prevPage();
@@ -555,6 +637,29 @@ class ReaderController extends ChangeNotifier {
       if (_progress.pageIndex < pageCount - 1) {
         nextPage();
       }
+    }
+  }
+
+  /// 长页模式侧边区点按：沿阅读方向平滑滚动约一屏。
+  void _scrollByViewport(int direction) {
+    final c = verticalScroll;
+    if (c == null || !c.hasClients) return;
+    final viewport = c.position.viewportDimension;
+    if (viewport <= 0) return;
+    // 目标 = 当前偏移 ± 0.9 屏，clamp 到可滚动边界：
+    // 末屏剩余不足 0.9 屏时只滚剩余的那一段（animateTo 距离即剩余量，不会甩过）。
+    final max = c.position.maxScrollExtent;
+    final desired = c.offset + direction * viewport * 0.9;
+    final target = desired.clamp(0.0, max);
+    // 剩余不足半屏时距离很短，按比例缩短动画时长，避免"一小段路走很久"。
+    final dist = (target - c.offset).abs();
+    final duration = dist < viewport * 0.5
+        ? _animDuration * 0.5
+        : _animDuration;
+    if (_animEnabled) {
+      c.animateTo(target, duration: duration, curve: Curves.easeOutCubic);
+    } else {
+      c.jumpTo(target);
     }
   }
 
@@ -760,6 +865,7 @@ class ReaderController extends ChangeNotifier {
     // ★ 退出前强制保存一次（不能只依赖防抖计时器）
     unawaited(saveNow());
     verticalScroll?.removeListener(_onVerticalScroll);
+    knownPageHeights.clear();
     arbiter.removeListener(_onArbiterChanged);
     arbiter.dispose();
     tapArbiter.dispose();

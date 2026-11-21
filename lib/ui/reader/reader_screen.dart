@@ -30,6 +30,7 @@ import '../../data/prefs_store.dart';
 import '../../reader/document.dart';
 import '../../reader/page_cache.dart';
 import '../../reader/reader_controller.dart';
+import 'height_jump_compensator.dart';
 import 'widgets/page_image.dart';
 import 'widgets/progress_bar.dart';
 import 'widgets/text_page_view.dart';
@@ -45,6 +46,8 @@ class ReaderScreen extends StatefulWidget {
     required this.onSettingsChanged,
     this.extraction,
     this.store,
+    this.onArchivePasswordSubmit,
+    this.onArchivePasswordAccepted,
   });
 
   final BookMeta book;
@@ -60,6 +63,30 @@ class ReaderScreen extends StatefulWidget {
       resolveDocument;
 
   final ValueChanged<ReaderSettings> onSettingsChanged;
+
+  /// 打开加密压缩包时补填密码：验证通过后写回书源（重试才会拿到密码）。
+  /// 返回 false = 密码不正确（书源不变，弹窗重新询问）。
+  final Future<bool> Function(String password)? onArchivePasswordSubmit;
+
+  /// 密码验证成功（开书成功）后调用：把密码自动加入密码字典，
+  /// 下次打开不再询问。
+  final Future<void> Function(String password)? onArchivePasswordAccepted;
+
+  /// 页高跳变补偿的**核心判定**（纯函数，便于回归测试）。
+  ///
+  /// 返回需要补偿的滚动位移 Δ：
+  ///   - 首次基线（oldHeight 为 null）或高度未变 → 0（不补偿）
+  ///   - 页顶在视口内/下方（boxTop ≥ 0）→ 0（视口顶部锚点不受影响，
+  ///     补了反而会把正在看的画面推走）
+  ///   - 视口上方的页变高/变矮 → 返回高度差，由调用方累计后修正滚动位置
+  static double heightJumpCompensationDelta(
+      {required double? oldHeight,
+      required double newHeight,
+      required double boxTop}) {
+    if (oldHeight == null || oldHeight == newHeight) return 0.0;
+    if (boxTop >= 0) return 0.0;
+    return newHeight - oldHeight;
+  }
 
   @override
   State<ReaderScreen> createState() => _ReaderScreenState();
@@ -111,6 +138,14 @@ class _ReaderScreenState extends State<ReaderScreen>
   Future<void> _bootstrap() async {
     try {
       final resolved = await widget.resolveDocument();
+      // 带密码重试成功 → **验证通过**，此刻才把密码自动加入密码字典
+      //（错密码在探测阶段就会被拦下，不会污染字典）。
+      final accepted = _submittedPassword;
+      if (accepted != null) {
+        _submittedPassword = null;
+        _passwordAttempts = 0;
+        await widget.onArchivePasswordAccepted?.call(accepted);
+      }
 
       final controller = ReaderController(
         book: widget.book,
@@ -147,6 +182,12 @@ class _ReaderScreenState extends State<ReaderScreen>
       WidgetsBinding.instance.addPostFrameCallback((_) => _restoreProgress());
     } catch (e, st) {
       if (!mounted) return;
+      // ── 加密压缩包：**开书时直接弹密码框**，不再让用户去设置里
+      //    手动往字典里加密码（旧流程：每页错误占位 → 设置 → 字典 → 重开）。
+      if (e is AppError && e.action == ErrorAction.enterPassword) {
+        await _askArchivePassword();
+        return;
+      }
       setState(() {
         _fatalError = e is AppError
             ? e
@@ -154,6 +195,80 @@ class _ReaderScreenState extends State<ReaderScreen>
         _loading = false;
       });
     }
+  }
+
+  // ------------------------------------------------------------------
+  // 加密压缩包密码：弹窗补填 → 验证 → 成功后自动入字典
+  // ------------------------------------------------------------------
+  int _passwordAttempts = 0;
+
+  /// 已提交、待验证成功的密码（bootstrap 成功后自动入字典）。
+  String? _submittedPassword;
+
+  Future<void> _askArchivePassword() async {
+    final controller = TextEditingController();
+    final pwd = await showDialog<String>(
+      context: context,
+      barrierDismissible: false,
+      builder: (ctx) => AlertDialog(
+        title: const Text('压缩包已加密'),
+        content: Column(
+          mainAxisSize: MainAxisSize.min,
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            if (_passwordAttempts > 0)
+              const Padding(
+                padding: EdgeInsets.only(bottom: 8),
+                child: Text('上次输入的密码不正确，请重试',
+                    style: TextStyle(color: Colors.redAccent, fontSize: 13)),
+              ),
+            TextField(
+              controller: controller,
+              obscureText: true,
+              autofocus: true,
+              decoration: const InputDecoration(hintText: '请输入密码'),
+              onSubmitted: (v) => Navigator.of(ctx).pop(v.trim()),
+            ),
+            const SizedBox(height: 8),
+            const Text(
+              '密码验证通过后会自动加入密码字典，下次打开不再询问。',
+              style: TextStyle(fontSize: 12, color: Colors.white54),
+            ),
+          ],
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.of(ctx).pop(),
+            child: const Text('取消'),
+          ),
+          FilledButton(
+            onPressed: () => Navigator.of(ctx).pop(controller.text.trim()),
+            child: const Text('确定'),
+          ),
+        ],
+      ),
+    );
+    if (!mounted) return;
+    if (pwd == null || pwd.isEmpty) {
+      // 用户取消：密码不填就读不了，退回书架
+      Navigator.of(context).maybePop();
+      return;
+    }
+    _passwordAttempts++;
+    _submittedPassword = pwd;
+    // 先写回书源：resolveDocument 重试时才能拿到密码
+    final ok = await widget.onArchivePasswordSubmit?.call(pwd) ?? false;
+    if (!mounted) return;
+    if (!ok) {
+      // 密码不正确（探针失败）：重新弹窗
+      await _askArchivePassword();
+      return;
+    }
+    setState(() {
+      _loading = true;
+      _fatalError = null;
+    });
+    await _bootstrap();
   }
 
   ReadingMode _defaultModeFor(Document doc) {
@@ -192,6 +307,8 @@ class _ReaderScreenState extends State<ReaderScreen>
 
   @override
   void dispose() {
+    _compensator.dispose(
+        _verticalScroll.hasClients ? _verticalScroll.position : null);
     _controller?.dispose();
     _verticalScroll.dispose();
     _horizontalPager?.dispose();
@@ -320,7 +437,17 @@ class _ReaderScreenState extends State<ReaderScreen>
                     left: 0,
                     right: 0,
                     bottom: c.menuVisible ? 72 : 0,
-                    child: ReaderProgressBar(controller: c),
+                    // 菜单收起时进度条只是指示器，不拦截触摸。
+                    //
+                    // 原因：Slider 在 pointer down 瞬间就接管手势并直接
+                    // 跳转（tapAndSlide 默认交互）—— 用户阅读时手指习惯
+                    // 从屏幕下缘起手上滑，一碰到底部 34px 热区画面就瞬移，
+                    // 看起来就是"没碰进度条、画面自己动了"。
+                    // 想拖进度：点中间呼出菜单后再拖（那时才可交互）。
+                    child: IgnorePointer(
+                      ignoring: !c.menuVisible,
+                      child: ReaderProgressBar(controller: c),
+                    ),
                   ),
 
                   // 亮度遮罩（不改系统亮度，只在阅读器内压暗）
@@ -429,36 +556,49 @@ class _ReaderScreenState extends State<ReaderScreen>
     return AnimatedBuilder(
       animation: c.arbiter,
       builder: (context, _) {
-        return CustomScrollView(
-          controller: _verticalScroll,
-          // ★ 预取窗口：上下各 1.5 屏。
-          //   ScrollCacheExtent.viewport(1.5) 的语义正是"viewport 主轴长度的 1.5 倍"，
-          //   比手写像素换算更准确，也会随横竖屏自动变化。
-          scrollCacheExtent: const ScrollCacheExtent.viewport(1.5),
-          physics: c.arbiter.lockOuterScroll
-              ? const NeverScrollableScrollPhysics()
-              : const ClampingScrollPhysics(),
-          slivers: [
-            SliverList.builder(
-              itemCount: pages.length,
-              itemBuilder: (context, i) {
-                final page = pages[i];
-                // 注意这里**没有 SizedBox(height: ...)** —— 这是关键。
-                return RepaintBoundary(
-                  // RepaintBoundary：一页重绘不牵连其他页
-                  child: page.isText
-                      ? TextPageView(page: page, settings: settings)
-                      : PageImage(
-                          page: page,
-                          resolver: c.resolver,
-                          layoutMode: PageLayoutMode.intrinsic,
-                          onDimensionResolved: (dim) =>
-                              _onDimensionResolved(c, page.id, dim),
-                        ),
-                );
-              },
-            ),
-          ],
+        // ★ 首页/尾页防遮挡：把系统栏/挖孔/手势条的物理 inset 留出来。
+        //   沉浸式隐藏了系统栏，但 viewPadding 是**物理 inset**，不会随
+        //   隐藏变 0 —— 通知栏下拉、导航手势条、挖孔摄像头都不会再压在
+        //   第 1 页顶部和末页底部上。视口本身被内缩，滚动偏移语义不变，
+        //   进度恢复/补偿的像素计算不受影响。
+        final inset = MediaQuery.viewPaddingOf(context);
+        return Padding(
+          padding: EdgeInsets.only(top: inset.top, bottom: inset.bottom),
+          child: CustomScrollView(
+            controller: _verticalScroll,
+            // ★ 预取窗口：上下各 1.5 屏。
+            //   ScrollCacheExtent.viewport(1.5) 的语义正是"viewport 主轴长度的 1.5 倍"，
+            //   比手写像素换算更准确，也会随横竖屏自动变化。
+            scrollCacheExtent: const ScrollCacheExtent.viewport(1.5),
+            physics: c.arbiter.lockOuterScroll
+                ? const NeverScrollableScrollPhysics()
+                : const ClampingScrollPhysics(),
+            slivers: [
+              SliverList.builder(
+                itemCount: pages.length,
+                itemBuilder: (context, i) {
+                  final page = pages[i];
+                  // 注意这里**没有 SizedBox(height: ...)** —— 这是关键。
+                  return RepaintBoundary(
+                    // RepaintBoundary：一页重绘不牵连其他页
+                    child: page.isText
+                        ? TextPageView(page: page, settings: settings)
+                        : PageImage(
+                            page: page,
+                            resolver: c.resolver,
+                            layoutMode: PageLayoutMode.intrinsic,
+                            knownHeight: c.knownHeightOf(page.id),
+                            onDimensionResolved: (dim) =>
+                                _onDimensionResolved(c, page.id, dim),
+                            onHeightResolved: (pageId, oldH, newH, boxTop) =>
+                                _onPageHeightChanged(
+                                    c, pageId, oldH, newH, boxTop),
+                          ),
+                  );
+                },
+              ),
+            ],
+          ),
         );
       },
     );
@@ -485,6 +625,39 @@ class _ReaderScreenState extends State<ReaderScreen>
         _lastViewport?.width ?? MediaQuery.maybeSizeOf(context)?.width ?? 1080;
     // 合并到下一帧、并做 300ms 防抖，避免每解码一页就全量重算
     c.scheduleMetricsRebuild(width);
+  }
+
+  // ------------------------------------------------------------------
+  // 页高跳变补偿（长页模式的「自动翻页 / 怎么划都闪回」修复）
+  //
+  // 占位（嗅探估算）→ 解码真实比例的瞬间，页高会变。视口**上方**的页
+  // 变高/变矮会把视口内内容整体推走，用户正在看的内容凭空移动；
+  // SliverList 的滚动位置是绝对像素，不会自动跟随 —— 必须自己补。
+  //
+  // 补偿规则：页顶仍在视口上方（boxTop < 0）才需要补 Δ；
+  // 页顶在视口内（boxTop ≥ 0）说明视口顶部锚点不受影响，补了反而会把
+  // 正在看的画面推走。同帧多页变化累计成一次 jumpTo，避免连续抖动。
+  //
+  // 状态机在 [HeightJumpCompensator]（可独立测试）。
+  // ------------------------------------------------------------------
+  final HeightJumpCompensator _compensator = HeightJumpCompensator();
+
+  void _onPageHeightChanged(ReaderController c, String pageId,
+      double? oldHeight, double newHeight, double boxTop) {
+    // 「旧→新」才记入已知高度表（首次基线可能还是占位高，不可信）。
+    if (oldHeight != null) c.noteKnownPageHeight(pageId, newHeight);
+    final delta = ReaderScreen.heightJumpCompensationDelta(
+        oldHeight: oldHeight, newHeight: newHeight, boxTop: boxTop);
+    if (delta == 0) return;
+
+    final sc = c.verticalScroll;
+    if (sc == null) return;
+
+    // 同帧多页变化合并：累积 Δ，帧末一次性修正滚动位置。
+    _compensator.accumulate(delta);
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      _compensator.flush(sc);
+    });
   }
 
   // ------------------------------------------------------------------
@@ -669,8 +842,12 @@ class _ReaderMenuOverlay extends StatelessWidget {
                 ),
               ),
             ),
-            SafeArea(
-              child: Column(
+            // ★ 不用 SafeArea：顶栏背景要**延伸到屏幕最顶**，盖住挖孔/摄像头
+            //   区域（用户要求）；用 viewPadding 手动留出状态栏高度。
+            //   同理底栏手动留出手势条高度。
+            Builder(builder: (context) {
+              final inset = MediaQuery.viewPaddingOf(context);
+              return Column(
                 children: [
                   // —— 顶部栏 ——（显隐带滑动+淡入过渡，替代旧版瞬变）
                   AnimatedSlide(
@@ -682,57 +859,120 @@ class _ReaderMenuOverlay extends StatelessWidget {
                       duration: const Duration(milliseconds: 180),
                       child: Container(
                         color: Colors.black.withValues(alpha: 0.86),
-                        padding: const EdgeInsets.symmetric(
-                            horizontal: 4, vertical: 4),
-                        child: Row(
+                        padding: EdgeInsets.fromLTRB(4, inset.top + 4, 4, 4),
+                        child: Column(
+                          mainAxisSize: MainAxisSize.min,
                           children: [
-                            IconButton(
-                              icon: const Icon(Icons.arrow_back,
-                                  color: Colors.white),
-                              onPressed: () => Navigator.of(context).maybePop(),
+                            Row(
+                              children: [
+                                IconButton(
+                                  icon: const Icon(Icons.arrow_back,
+                                      color: Colors.white),
+                                  onPressed: () =>
+                                      Navigator.of(context).maybePop(),
+                                ),
+                                Expanded(
+                                  child: AnimatedBuilder(
+                                    animation: controller,
+                                    builder: (ctx, _) {
+                                      // ★ 遮罩里的名称显示**本章**名称：
+                                      //   合集漫画在库里叫合集名，阅读时
+                                      //   顶栏要告诉用户“现在看的是哪一话”。
+                                      //   单章节书仍显示书名。
+                                      final chapters = document.chapters;
+                                      final isMulti =
+                                          document.chapterCount > 1 &&
+                                              chapters.isNotEmpty;
+                                      final idx = controller
+                                          .progress.chapterIndex
+                                          .clamp(0, chapters.length - 1);
+                                      final title = isMulti
+                                          ? chapters[idx].title
+                                          : document.title;
+                                      return Column(
+                                        children: [
+                                          Text(
+                                            title,
+                                            maxLines: 1,
+                                            overflow: TextOverflow.ellipsis,
+                                            textAlign: TextAlign.center,
+                                            style: const TextStyle(
+                                                color: Colors.white,
+                                                fontSize: 15,
+                                                fontWeight: FontWeight.w600),
+                                          ),
+                                          AnimatedBuilder(
+                                            animation: controller.progressLabel,
+                                            builder: (ctx, _) => Text(
+                                              controller.progressLabel.value,
+                                              textAlign: TextAlign.center,
+                                              style: const TextStyle(
+                                                  color: Colors.white60,
+                                                  fontSize: 12),
+                                            ),
+                                          ),
+                                        ],
+                                      );
+                                    },
+                                  ),
+                                ),
+                                IconButton(
+                                  tooltip: '阅读设置',
+                                  icon: const Icon(Icons.tune,
+                                      color: Colors.white),
+                                  onPressed: () {
+                                    onClose();
+                                    showSettingsSheet(
+                                      context: context,
+                                      settings: settings,
+                                      onChanged: onSettingsChanged,
+                                      onModeChanged: onModeChanged,
+                                      document: document,
+                                      controller: controller,
+                                      extraction: extraction,
+                                      bookId: bookId,
+                                      store: store,
+                                    );
+                                  },
+                                ),
+                              ],
                             ),
-                            Expanded(
-                              child: Column(
-                                crossAxisAlignment: CrossAxisAlignment.start,
-                                children: [
-                                  Text(
-                                    document.title,
-                                    maxLines: 1,
-                                    overflow: TextOverflow.ellipsis,
+                            // —— 章节下拉选择器 ——（多章节合集才出现）
+                            if (document.chapterCount > 1 &&
+                                document.chapters.isNotEmpty)
+                              AnimatedBuilder(
+                                animation: controller,
+                                builder: (ctx, _) {
+                                  final chapters = document.chapters;
+                                  final cur = controller
+                                      .progress.chapterIndex
+                                      .clamp(0, chapters.length - 1);
+                                  return DropdownButton<int>(
+                                    value: cur,
+                                    isExpanded: true,
+                                    dropdownColor: const Color(0xFF23272F),
+                                    underline: const SizedBox.shrink(),
                                     style: const TextStyle(
-                                        color: Colors.white,
-                                        fontSize: 15,
-                                        fontWeight: FontWeight.w600),
-                                  ),
-                                  AnimatedBuilder(
-                                    animation: controller.progressLabel,
-                                    builder: (ctx, _) => Text(
-                                      controller.progressLabel.value,
-                                      style: const TextStyle(
-                                          color: Colors.white60, fontSize: 12),
-                                    ),
-                                  ),
-                                ],
+                                        color: Colors.white, fontSize: 13),
+                                    icon: const Icon(Icons.arrow_drop_down,
+                                        color: Colors.white70),
+                                    items: [
+                                      for (final ch in chapters)
+                                        DropdownMenuItem(
+                                          value: ch.index,
+                                          child: Text(
+                                            '${ch.index + 1}/${document.chapterCount}  ${ch.title}',
+                                            maxLines: 1,
+                                            overflow: TextOverflow.ellipsis,
+                                          ),
+                                        ),
+                                    ],
+                                    onChanged: (i) {
+                                      if (i != null) controller.goToChapter(i);
+                                    },
+                                  );
+                                },
                               ),
-                            ),
-                            IconButton(
-                              tooltip: '阅读设置',
-                              icon: const Icon(Icons.tune, color: Colors.white),
-                              onPressed: () {
-                                onClose();
-                                showSettingsSheet(
-                                  context: context,
-                                  settings: settings,
-                                  onChanged: onSettingsChanged,
-                                  onModeChanged: onModeChanged,
-                                  document: document,
-                                  controller: controller,
-                                  extraction: extraction,
-                                  bookId: bookId,
-                                  store: store,
-                                );
-                              },
-                            ),
                           ],
                         ),
                       ),
@@ -751,8 +991,7 @@ class _ReaderMenuOverlay extends StatelessWidget {
                       duration: const Duration(milliseconds: 180),
                       child: Container(
                         color: Colors.black.withValues(alpha: 0.82),
-                        padding: const EdgeInsets.symmetric(
-                            horizontal: 12, vertical: 10),
+                        padding: EdgeInsets.fromLTRB(12, 10, 12, 10 + inset.bottom),
                         child: Row(
                           mainAxisAlignment: MainAxisAlignment.spaceEvenly,
                           children: ReadingMode.values.map((mode) {
@@ -794,12 +1033,13 @@ class _ReaderMenuOverlay extends StatelessWidget {
                     ),
                   ),
                 ],
-              ),
-            ),
-          ],
+            );
+          },
         ),
-      ),
-    );
+      ],
+    ),
+  ),
+);
   }
 }
 
