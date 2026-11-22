@@ -133,14 +133,15 @@ FakeDav _sampleLibrary() => FakeDav({
 
 void main() {
   group('scanLibrary · 合并合集（默认关闭时行为不变）', () {
-    test('关闭时每一话各成一本，命名仍是「XX 第一话」', () async {
+    test('关闭时每一话各成一本，命名带合集原名「A合集 第一话」', () async {
       final list = await WebDavFolderImporter.scanLibrary(
         _client(_sampleLibrary()),
         'http://nas:5005/dav/comic',
       );
 
       final names = list.map((c) => c.name).toList();
-      expect(names, containsAll(['A 第一话', 'A 第二话']));
+      // ★ 0.15.3 删掉名称过滤：合集名原样拼接，不再去「合集」二字
+      expect(names, containsAll(['A合集 第一话', 'A合集 第二话']));
       expect(list.every((c) => !c.isCollection), isTrue);
       // 两个 zip 各成一本
       expect(list.where((c) => c.isArchive).length, 2);
@@ -159,14 +160,14 @@ void main() {
       // 开启后不该再有"每话一本"的散书
       expect(list.where((c) => !c.isCollection).length, 0);
 
-      final a = collections.firstWhere((c) => c.name == 'A');
-      expect(a.name, 'A'); // 「合集」二字已去掉
+      final a = collections.firstWhere((c) => c.name == 'A合集');
+      expect(a.name, 'A合集'); // ★ 书名 = 文件夹名原样，不过滤
       expect(a.chapters.map((c) => c.title).toList(), ['第一话', '第二话']);
       expect(a.chapters.first.images.length, 2);
       // 候选 URL 是**合集目录**（判重与重建文档都以它为准）
       expect(a.url, endsWith('/A%E5%90%88%E9%9B%86/'));
 
-      final b = collections.firstWhere((c) => c.name == 'B');
+      final b = collections.firstWhere((c) => c.name == 'B合集');
       expect(b.chapters.map((c) => c.title).toList(), ['第三话', '第四话']);
       expect(b.chapters.every((c) => c.isArchive), isTrue);
     });
@@ -211,7 +212,7 @@ void main() {
 
       expect(dropped, isTrue); // 空响应确实发生过
       final names = list.where((c) => c.isCollection).map((c) => c.name);
-      expect(names, contains('A')); // 重试后合集没丢
+      expect(names, contains('A合集')); // 重试后合集没丢
     });
   });
 
@@ -413,7 +414,7 @@ void main() {
   });
 
   group('buildMergedCollection · 逐话复用 _build 再合并', () {
-    test('2 话 × 2 图 → 1 本 4 页 2 章，书名不带「合集」', () async {
+    test('2 话 × 2 图 → 1 本 4 页 2 章，书名 = 合集文件夹原名', () async {
       final dav = _sampleLibrary();
       final client = _client(dav);
       final candidates = await WebDavFolderImporter.scanLibrary(
@@ -421,7 +422,7 @@ void main() {
         'http://nas:5005/dav/comic',
         mergeCollections: true,
       );
-      final candidate = candidates.firstWhere((c) => c.name == 'A');
+      final candidate = candidates.firstWhere((c) => c.name == 'A合集');
 
       final doc = await WebDavFolderImporter.buildMergedCollection(
         conn: WebDavConnection(
@@ -436,7 +437,7 @@ void main() {
         candidate: candidate,
       );
 
-      expect(doc.title, 'A');
+      expect(doc.title, 'A合集'); // ★ 书名 = 文件夹名原样
       expect(doc.kind, DocumentKind.comic);
       expect(doc.chapters.length, 2);
       expect(doc.pageCount, 4);

@@ -32,6 +32,7 @@ class WebDavArchivePageResolver implements PageByteResolver {
     required this.cacheDir,
     required this.pages,
     this.archiveSize,
+    this.password,
     this.prefetchRadius = 2,
   }) : _cache = PageImageCache(
           maxEntries: 24,
@@ -52,6 +53,9 @@ class WebDavArchivePageResolver implements PageByteResolver {
 
   /// 已知的包大小（省一次 PROPFIND）
   final int? archiveSize;
+
+  /// 加密包密码（ZipCrypto）。来自书源或页引用，读条目时用于解密。
+  final String? password;
 
   final int prefetchRadius;
 
@@ -82,7 +86,7 @@ class WebDavArchivePageResolver implements PageByteResolver {
         client: client,
         knownSize: archiveSize,
       );
-      final zip = ZipArchiveSource(src);
+      final zip = ZipArchiveSource(src, password: password);
       await zip.open();
       for (final e in zip.entries) {
         _entryByName[e.entryPath] = e;

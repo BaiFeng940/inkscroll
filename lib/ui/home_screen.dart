@@ -31,7 +31,8 @@ class HomeScreen extends StatefulWidget {
 
 class _HomeScreenState extends State<HomeScreen>
     with SingleTickerProviderStateMixin {
-  late final TabController _tabs = TabController(length: 2, vsync: this);
+  // 本地库 / 在线库 / 收藏
+  late final TabController _tabs = TabController(length: 3, vsync: this);
   final _searchController = TextEditingController();
   String _query = '';
 
@@ -91,11 +92,16 @@ class _HomeScreenState extends State<HomeScreen>
         _selected.clear();
       });
 
-  /// 当前标签页里可见的书（全选要按当前标签算，不能跨库）
-  List<BookMeta> _visibleBooks(AppState app) => app.searchIn(
-        _tabs.index == 0 ? app.localBooks : app.onlineBooks,
-        _query,
-      );
+  /// 当前标签页里可见的书（全选要按当前标签算，不能跨库）。
+  /// index 2 = 收藏，也要算 —— 否则收藏页批量管理的"全选"会按在线库算。
+  List<BookMeta> _visibleBooks(AppState app) {
+    final base = switch (_tabs.index) {
+      0 => app.localBooks,
+      1 => app.onlineBooks,
+      _ => app.favorites,
+    };
+    return app.searchIn(base, _query);
+  }
 
   @override
   void dispose() {
@@ -520,50 +526,6 @@ class _HomeScreenState extends State<HomeScreen>
         },
         child: Column(
         children: [
-          // ── 导入进度横幅（网盘库导入/单本导入时显示，完成后自动消失）──
-          //   AppState.importProgress 只在状态里，从没被任何 UI 消费过 ——
-  //   用户只能干等。这里挂一张非阻塞横幅：进度条 + 当前步骤文字。
-          if (app.importProgress != null)
-            Material(
-              color: theme.colorScheme.surfaceContainerHighest
-                  .withValues(alpha: 0.55),
-              child: Padding(
-                padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
-                child: Row(
-                  children: [
-                    const SizedBox(
-                      width: 18,
-                      height: 18,
-                      child: CircularProgressIndicator(strokeWidth: 2),
-                    ),
-                    const SizedBox(width: 12),
-                    Expanded(
-                      child: Column(
-                        crossAxisAlignment: CrossAxisAlignment.start,
-                        mainAxisSize: MainAxisSize.min,
-                        children: [
-                          Text(
-                            app.importProgress!.label,
-                            maxLines: 1,
-                            overflow: TextOverflow.ellipsis,
-                            style: const TextStyle(fontSize: 12),
-                          ),
-                          const SizedBox(height: 4),
-                          ClipRRect(
-                            borderRadius: BorderRadius.circular(4),
-                            child: LinearProgressIndicator(
-                              value: app.importProgress!.ratio
-                                  .clamp(0.0, 1.0),
-                              minHeight: 4,
-                            ),
-                          ),
-                        ],
-                      ),
-                    ),
-                  ],
-                ),
-              ),
-            ),
           // ── 顶部：搜索框 + 设置（批量选择时换成选择栏）──
           if (_selecting)
             _buildSelectionBar(app, topPad)
@@ -578,7 +540,11 @@ class _HomeScreenState extends State<HomeScreen>
                       textInputAction: TextInputAction.search,
                       decoration: InputDecoration(
                         prefixIcon: const Icon(Icons.search, size: 20),
-                        hintText: _tabs.index == 0 ? '搜索本地库' : '搜索在线库',
+                        hintText: switch (_tabs.index) {
+                          0 => '搜索本地库',
+                          1 => '搜索在线库',
+                          _ => '搜索收藏',
+                        },
                         isDense: true,
                         filled: true,
                         fillColor: theme.colorScheme.surfaceContainerHighest
@@ -625,8 +591,53 @@ class _HomeScreenState extends State<HomeScreen>
             tabs: const [
               Tab(text: '本地库'),
               Tab(text: '在线库'),
+              Tab(text: '收藏'),
             ],
           ),
+
+          // ── 导入进度横幅：挂在 Tab 条下面、紧贴书架内容 ──
+          //   （0.15.3 从最顶上移到 本地库/在线库/收藏 标签下方）
+          if (app.importProgress != null)
+            Material(
+              color: theme.colorScheme.surfaceContainerHighest
+                  .withValues(alpha: 0.55),
+              child: Padding(
+                padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+                child: Row(
+                  children: [
+                    const SizedBox(
+                      width: 18,
+                      height: 18,
+                      child: CircularProgressIndicator(strokeWidth: 2),
+                    ),
+                    const SizedBox(width: 12),
+                    Expanded(
+                      child: Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        mainAxisSize: MainAxisSize.min,
+                        children: [
+                          Text(
+                            app.importProgress!.label,
+                            maxLines: 1,
+                            overflow: TextOverflow.ellipsis,
+                            style: const TextStyle(fontSize: 12),
+                          ),
+                          const SizedBox(height: 4),
+                          ClipRRect(
+                            borderRadius: BorderRadius.circular(4),
+                            child: LinearProgressIndicator(
+                              value: app.importProgress!.ratio
+                                  .clamp(0.0, 1.0),
+                              minHeight: 4,
+                            ),
+                          ),
+                        ],
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+            ),
 
           Expanded(
             child: TabBarView(
@@ -667,6 +678,19 @@ class _HomeScreenState extends State<HomeScreen>
                       if (mounted) await app.refreshBooks();
                     },
                   ),
+                ),
+                // 收藏：跨本地/在线，只显示 isFavorite 的书（0.15.3 新增）
+                _BookGrid(
+                  books: app.searchIn(app.favorites, _query),
+                  onOpen: _openBook,
+                  onChanged: () => app.refreshBooks(),
+                  selecting: _selecting,
+                  selected: _selected,
+                  onStartSelect: _startSelect,
+                  onToggleSelect: _toggleSelect,
+                  emptyHint: '还没有收藏。\n'
+                      '长按书封进入批量管理，勾选后点「收藏」，\n'
+                      '收藏的书会集中出现在这里。',
                 ),
               ],
             ),

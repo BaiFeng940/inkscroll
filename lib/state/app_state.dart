@@ -235,6 +235,26 @@ class AppState extends ChangeNotifier {
       // 允许后台加载：导入期间持有 CPU 唤醒锁 + Wi-Fi 高性能锁。
       // 否则用户切到后台或息屏后，系统会降频 CPU 并把 Wi-Fi 打进省电模式，
       // 几十本书的导入会明显变慢甚至被中断。
+
+      // ★ 渐进入库：完成的批次每 700ms 落盘 + 刷新一次书架，
+      //   用户马上能看到已导入的书陆续出现，不用等整批跑完。
+      //   不逐本刷新的原因：每次刷新都是全量 JSON 读写，大库上会退化成 O(n²)。
+      //   （定义在 try 之前：finally 里收尾也要用它。）
+      var lastPublishAt = DateTime.now();
+      Future<void> publishPending({required bool force}) async {
+        if (pending.isEmpty) return;
+        final now = DateTime.now();
+        if (!force && now.difference(lastPublishAt).inMilliseconds < 700) {
+          return;
+        }
+        lastPublishAt = now;
+        final batch = List.of(pending);
+        pending.clear();
+        await _prefs.upsertBooks(batch);
+        books = _prefs.loadBooks();
+        notifyListeners();
+      }
+
       final locked = await acquireImportLock();
       try {
         // ── 并发导入 ──
@@ -250,9 +270,10 @@ class AppState extends ChangeNotifier {
         // 排队，且更容易触碰网盘的软限流。每本书内部还有自己的抽样并发，
         // 因此实际同时在飞的请求约为 4 × 3 ≈ 12 个。
         final results = List<BookMeta?>.filled(fresh.length, null);
-        final perSlotBatch = List<List<BookMeta>?>.filled(fresh.length, null);
         var nextIndex = 0;
         var finished = 0;
+
+
 
         Future<void> worker() async {
           while (true) {
@@ -271,6 +292,7 @@ class AppState extends ChangeNotifier {
                   conn: connection,
                   client: client,
                   candidate: c,
+                  archivePasswordGuesses: zipPasswords,
                 );
                 // 来源记**合集目录**：既方便之后判重，也让重建文档时
                 // 能顺着这个目录再扫出各话（见 buildDocument 的兜底）。
@@ -288,12 +310,17 @@ class AppState extends ChangeNotifier {
                 // ★ 网盘上的压缩包：一本书 = 一个包。
                 //   只读中央目录 + 少量样本，不解压整包。
                 final bookId = ByteStore.newBookId();
-                final doc = await WebDavArchiveImporter.buildDocument(
+                // ★ 加密包密码自愈：书源密码（无）→ 密码字典 逐个 1KB 试读。
+                //   命中 → 固化进书源；全失败 → 仍建册（尺寸走估算），
+                //   开书时再弹密码框（0.15.3 前是逐页「点击重试」死循环）。
+                final (doc, goodPwd) =
+                    await WebDavArchiveImporter.buildDocumentWithGuesses(
                   client: client,
                   connectionId: connection.id,
                   archiveUrl: c.url,
                   archiveName: c.name,
                   knownSize: c.archiveSize,
+                  guesses: zipPasswords,
                 );
                 await DocumentCodec.save(store.bookDir(bookId), doc);
                 final meta = BookMeta(
@@ -305,6 +332,7 @@ class AppState extends ChangeNotifier {
                     archiveUrl: c.url,
                     archiveName: c.name,
                     archiveSize: c.archiveSize,
+                    password: goodPwd,
                   ),
                   pageCount: doc.pageCount,
                   chapterCount: doc.chapterCount,
@@ -339,7 +367,11 @@ class AppState extends ChangeNotifier {
               debugPrint('[import]   stack: $st');
               failures.add('${c.name}: $e');
             }
-            perSlotBatch[i] = localBatch;
+            // ★ 渐进入库：这本（批）一完成就落盘 + 刷新（节流见 publishPending）。
+            if (localBatch.isNotEmpty) {
+              pending.addAll(localBatch);
+              await publishPending(force: false);
+            }
             finished++;
             final label = '${c.name}（${c.pageCount} 页）';
             _setProgress(
@@ -356,11 +388,9 @@ class AppState extends ChangeNotifier {
         );
         await Future.wait(List.generate(workerCount, (_) => worker()));
 
-        // 按目录顺序合并结果（并发完成顺序 ≠ 目录顺序）
+        // 汇总成功清单（批次已随完成逐个发布，见 worker 里的 publishPending）
         for (var i = 0; i < results.length; i++) {
           final meta = results[i];
-          final batch = perSlotBatch[i];
-          if (batch != null) pending.addAll(batch);
           if (meta != null) imported.add(meta);
         }
       } finally {
@@ -369,12 +399,14 @@ class AppState extends ChangeNotifier {
         // ★ 防重入标志必须复位。旧实现漏了这一行 —— 第一轮批量导入
         //   结束后，本次会话内再次「添加为库」永远报"已有一批导入正在进行"
         //   （审计 P1-1，真机可感）。
+        _importing = false;
+        // ★ 进度横幅清零：与单本导入（importFrom / importWithPassword）口径一致。
+        //   批量导入的 finally 漏了这一步，导致导入结束后横幅永远停在 100% 不消失
+        //   （真机可感）。终态（ratio == null）不节流，立即广播。
+        _setProgress(null, '');
 
-        // ★ 一次写盘 + 一次刷新。逐本 upsertBook + notifyListeners
-        //   在大库上是 O(n²) 的 JSON 编解码，导入后半段会明显卡。
-        if (pending.isNotEmpty) {
-          await _prefs.upsertBooks(pending);
-        }
+        // 节流窗口里攒着的尾巴强制刷掉；其余批次已随完成逐个发布。
+        await publishPending(force: true);
         books = _prefs.loadBooks();
         notifyListeners();
 
@@ -750,6 +782,8 @@ class AppState extends ChangeNotifier {
 
     final meta = BookMeta(
       id: bookId,
+      // 书名一律原样：0.15.3 删掉了「括号/合集字样」过滤 —— 用户要求
+      // 库里直接显示文件夹/文件名（如「XX合集」），不再改写成「XX」。
       title: pick.displayName,
       kind: switch (doc.kind) {
         DocumentKind.comic => BookKind.comic,
@@ -1077,6 +1111,35 @@ class AppState extends ChangeNotifier {
     final b = bookById(bookId);
     if (b == null) return false;
     final src = b.source;
+    if (src is WebDavArchiveSource) {
+      // 网盘压缩包：远端 1KB 试读验证 → 带密码写回书源，下次直接可用。
+      final conn = webdavConnections.byId(src.connectionId);
+      if (conn == null) return false;
+      final client = conn.createClient();
+      final bool ok;
+      try {
+        ok = await WebDavArchiveImporter.probePassword(
+          client: client,
+          archiveUrl: src.archiveUrl,
+          knownSize: src.archiveSize,
+          password: password,
+        );
+      } finally {
+        client.close();
+      }
+      if (!ok) return false;
+      await _replaceBookSource(
+        b,
+        WebDavArchiveSource(
+          connectionId: src.connectionId,
+          archiveUrl: src.archiveUrl,
+          archiveName: src.archiveName,
+          archiveSize: src.archiveSize,
+          password: password,
+        ),
+      );
+      return true;
+    }
     if (src is! ArchiveSourceSpec) return false;
 
     // ── 验证：用新密码开包并试读第一个加密条目（≤1KB）──
@@ -1125,6 +1188,68 @@ class AppState extends ChangeNotifier {
     } finally {
       await z.close();
     }
+  }
+
+  /// 用新书源整体替换一本书的 source（保留其余元数据）并刷新书架。
+  /// 密码自愈 / 阅读器补填都用它，避免到处手抄 BookMeta 拷贝。
+  Future<void> _replaceBookSource(BookMeta b, BookSource source) async {
+    final meta = BookMeta(
+      id: b.id,
+      title: b.title,
+      kind: b.kind,
+      source: source,
+      pageCount: b.pageCount,
+      chapterCount: b.chapterCount,
+      importedAt: b.importedAt,
+      coverPath: b.coverPath,
+      author: b.author,
+      isFavorite: b.isFavorite,
+      lastReadAt: b.lastReadAt,
+      description: b.description,
+    );
+    await _prefs.upsertBook(meta);
+    books = _prefs.loadBooks();
+    notifyListeners();
+  }
+
+  /// 把试出的网盘压缩包密码固化进书源。
+  Future<void> _persistWebDavArchivePassword(BookMeta book, String pwd) async {
+    final b = bookById(book.id);
+    if (b == null) return;
+    final src = b.source;
+    if (src is! WebDavArchiveSource || src.password == pwd) return;
+    await _replaceBookSource(
+      b,
+      WebDavArchiveSource(
+        connectionId: src.connectionId,
+        archiveUrl: src.archiveUrl,
+        archiveName: src.archiveName,
+        archiveSize: src.archiveSize,
+        password: pwd,
+      ),
+    );
+  }
+
+  /// 开书前的密码自愈（本地压缩包）：书源没存密码 / 存的密码不对时，
+  /// 先逐个试密码字典。命中 → 固化进书源并返回新 spec；全失败 → 原样
+  /// 返回，后续正常开包抛 Required/Wrong → 阅读器弹密码框（人工兜底）。
+  Future<ArchiveSourceSpec> _selfHealArchivePassword(
+      BookMeta book, ArchiveSourceSpec spec) async {
+    if (zipPasswords.isEmpty) return spec;
+    final stored = spec.password;
+    if (stored != null && stored.isNotEmpty) {
+      if (await _probeArchivePassword(spec.path, stored)) return spec;
+    }
+    for (final guess in zipPasswords) {
+      if (guess == stored) continue;
+      if (await _probeArchivePassword(spec.path, guess)) {
+        final healed = ArchiveSourceSpec(
+            path: spec.path, format: spec.format, password: guess);
+        await _replaceBookSource(book, healed);
+        return healed;
+      }
+    }
+    return spec;
   }
 
   Future<({Document document, PageByteResolver resolver})> buildDocument(
@@ -1197,7 +1322,8 @@ class AppState extends ChangeNotifier {
           :final connectionId,
           :final archiveUrl,
           :final archiveName,
-          :final archiveSize
+          :final archiveSize,
+          :final password
         ):
         final conn = webdavConnections.byId(connectionId);
         if (conn == null) {
@@ -1206,22 +1332,33 @@ class AppState extends ChangeNotifier {
             '请重新添加网盘后再次导入这本书。',
           );
         }
-        final doc = cached ??
-            await WebDavArchiveImporter.buildDocument(
-              client: conn.createClient(),
-              connectionId: connectionId,
-              archiveUrl: archiveUrl,
-              archiveName: archiveName,
-              knownSize: archiveSize,
-            );
+        final client = conn.createClient();
+        // ★ 加密包自愈（0.15.3）：书源密码 → 密码字典 逐个试，命中就
+        //   固化进书源；全失败则抛 Required → 阅读器弹密码框。
+        //   （旧流程：导入成功但每页「压缩包已加密 + 点击重试」死循环。）
+        final built = await WebDavArchiveImporter.buildDocumentWithGuesses(
+          client: client,
+          connectionId: connectionId,
+          archiveUrl: archiveUrl,
+          archiveName: archiveName,
+          knownSize: archiveSize,
+          password: password,
+          guesses: zipPasswords,
+        );
+        final doc = cached ?? built.$1;
+        final goodPwd = built.$2 ?? password;
+        if (goodPwd != password && goodPwd != null) {
+          await _persistWebDavArchivePassword(book, goodPwd);
+        }
         return (
           document: doc,
           resolver: WebDavArchivePageResolver(
-            client: conn.createClient(),
+            client: client,
             archiveUrl: archiveUrl,
             archiveSize: archiveSize,
             cacheDir: Directory(store.webdavCacheDirFor(book.id)),
             pages: doc.pagesInOrder,
+            password: goodPwd,
           ),
         );
 
@@ -1231,7 +1368,10 @@ class AppState extends ChangeNotifier {
         //   book 参数是导航时的快照，拿不到刚写入的密码。
         //   旧版连书源里已存的密码都不传 —— 难怪开带密码的包每次都要
         //   去设置里手动加字典。
-        final spec = _freshArchiveSpec(book);
+        // ★ 密码字典自愈（0.15.3）：书源密码无效/缺失时先试字典，
+        //   命中就直接开书，不再弹框；全失败才走下面的弹窗路径。
+        final spec =
+            await _selfHealArchivePassword(book, _freshArchiveSpec(book));
         final ArchiveSource source =
             await _openArchive(src, path, password: spec.password);
 

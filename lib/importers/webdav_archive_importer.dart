@@ -34,9 +34,10 @@ class WebDavArchiveImporter {
 
   /// 网盘包最多嗅探多少张图的真实尺寸。
   ///
-  /// 同目录的漫画图几乎总是同一尺寸，6 个样本足够得到可信中位数；
-  /// 再往上加只是拿流量换精度，不划算。
-  static const int sniffSamples = 4;
+  /// 同目录的漫画图几乎总是同一尺寸，3 个样本（首/中/尾）足够得到
+  /// 可信中位数；再往上加只是拿流量换精度，不划算。
+  /// 0.15.3 又降了一档：建册提速，布局差异交给解码后自愈。
+  static const int sniffSamples = 3;
 
   /// 嗅探并发。网盘一般能承受 3~4 路；再高容易触发限流。
   static const int sniffConcurrency = 4;
@@ -56,6 +57,7 @@ class WebDavArchiveImporter {
     required String archiveUrl,
     required String archiveName,
     int? knownSize,
+    String? password,
     void Function(double progress, String label)? onProgress,
   }) async {
     try {
@@ -65,7 +67,7 @@ class WebDavArchiveImporter {
         client: client,
         knownSize: knownSize,
       );
-      final zip = ZipArchiveSource(src);
+      final zip = ZipArchiveSource(src, password: password);
       try {
         await zip.open();
 
@@ -130,6 +132,7 @@ class WebDavArchiveImporter {
                 connectionId: connectionId,
                 archiveUrl: archiveUrl,
                 entryPath: e.entryPath,
+                password: password,
               ),
             ),
           );
@@ -172,16 +175,100 @@ class WebDavArchiveImporter {
     }
   }
 
-  /// 抽样策略：前 3 张（用户最先看到的必须有精确高度）+ 均匀抽样 3 张。
+  // ---------------------------------------------------------------------------
+  // 加密包：密码自愈（0.15.3）
+  // ---------------------------------------------------------------------------
+
+  /// 建册前的密码自愈。
+  ///
+  /// 1. 依次试 [password]（书源里固化的）→ [guesses]（密码字典），
+  ///    每个候选只做「开中央目录 + 1KB 试读」判对错（见 [probePassword]）；
+  /// 2. 命中的密码用来建册并随 (Document, 密码) 返回，调用方固化进书源；
+  /// 3. 全部失败 → 抛 [ArchivePasswordRequiredError]，阅读器据此弹密码框。
+  ///
+  /// 未加密的包：第一个候选直接探过，几乎零额外代价。
+  /// 注意 [_sniffAspect] 会把密码错误吞成 null（当成"尺寸未知"），
+  /// 所以加密检测必须在这层做，不能指望 buildDocument 抛错。
+  static Future<(Document, String?)> buildDocumentWithGuesses({
+    required WebDavClient client,
+    required String connectionId,
+    required String archiveUrl,
+    required String archiveName,
+    int? knownSize,
+    String? password,
+    List<String> guesses = const [],
+    void Function(double progress, String label)? onProgress,
+  }) async {
+    final candidates = <String?>[
+      password,
+      ...guesses.where((g) => g.isNotEmpty && g != password),
+    ];
+    Object? last;
+    for (final pwd in candidates) {
+      final ok = await probePassword(
+        client: client,
+        archiveUrl: archiveUrl,
+        knownSize: knownSize,
+        password: pwd,
+      );
+      if (!ok) {
+        last = pwd == null
+            ? const ArchivePasswordRequiredError()
+            : const ArchivePasswordWrongError();
+        continue;
+      }
+      final doc = await buildDocument(
+        client: client,
+        connectionId: connectionId,
+        archiveUrl: archiveUrl,
+        archiveName: archiveName,
+        knownSize: knownSize,
+        password: pwd,
+        onProgress: onProgress,
+      );
+      return (doc, pwd);
+    }
+    if (last is AppError) throw last;
+    throw const ArchivePasswordRequiredError();
+  }
+
+  /// 用给定密码开包并试读第一个加密条目（≤1KB）。
+  /// true = 密码可用（或包内没有加密条目）；false = 缺失/不正确/不支持。
+  static Future<bool> probePassword({
+    required WebDavClient client,
+    required String archiveUrl,
+    int? knownSize,
+    String? password,
+  }) async {
+    final src = WebDavByteSource(
+      url: archiveUrl,
+      client: client,
+      knownSize: knownSize,
+    );
+    final zip = ZipArchiveSource(src, password: password);
+    try {
+      await zip.open();
+      final encrypted =
+          zip.entries.where((e) => e.isEncrypted && !e.isDirectory);
+      if (encrypted.isEmpty) return true;
+      await zip.readEntry(encrypted.first, maxBytes: 1024);
+      return true;
+    } on ArchivePasswordWrongError {
+      return false;
+    } on ArchivePasswordRequiredError {
+      // AES 等不支持的加密形式也会走到这里
+      return false;
+    } finally {
+      await zip.close();
+    }
+  }
+
+  /// 抽样策略：均匀取 [sniffSamples] 张（首张必中：第一页最常先看）。
   static List<ArchiveEntryInfo> _pickSamples(List<ArchiveEntryInfo> all) {
     if (all.length <= sniffSamples) return all;
     final picked = <int>{
-      0,
-      1,
-      2,
-      (all.length - 1) ~/ 3,
-      (all.length - 1) * 2 ~/ 3,
-      all.length - 1,
+      for (var i = 0; i < sniffSamples; i++)
+        (all.length - 1) * i ~/ (sniffSamples - 1),
     };
     final list = picked.where((i) => i >= 0 && i < all.length).toList()..sort();
     return list.map((i) => all[i]).toList();

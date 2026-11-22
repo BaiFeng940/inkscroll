@@ -207,6 +207,8 @@ class DocumentCodec {
           'archiveUrl': ref.archiveUrl,
           'entry': ref.entryPath,
           'conn': ref.connectionId,
+          if (ref.password != null && ref.password!.isNotEmpty)
+            'pw': ref.password,
         };
       case PdfPageRef():
         return {'t': 'pdf', 'path': ref.path, 'page': ref.pageIndex};
@@ -233,6 +235,7 @@ class DocumentCodec {
           connectionId: m['conn'] as String? ?? '',
           archiveUrl: m['archiveUrl'] as String,
           entryPath: m['entry'] as String,
+          password: m['pw'] as String?,
         );
       case 'pdf':
         return PdfPageRef(

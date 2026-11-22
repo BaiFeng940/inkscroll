@@ -29,6 +29,7 @@ sealed class BookSource {
           archiveUrl: json['archiveUrl'] as String? ?? '',
           archiveName: json['archiveName'] as String? ?? '',
           archiveSize: json['archiveSize'] as int?,
+          password: json['pw'] as String?,
         );
       case 'archive':
       default:
@@ -129,6 +130,7 @@ final class WebDavArchiveSource extends BookSource {
     required this.archiveUrl,
     required this.archiveName,
     this.archiveSize,
+    this.password,
   });
 
   final String connectionId;
@@ -142,6 +144,10 @@ final class WebDavArchiveSource extends BookSource {
   /// 包总字节数（目录列表里就有，省一次 PROPFIND）
   final int? archiveSize;
 
+  /// 加密包（ZipCrypto）的密码。导入/开书时从密码字典试出后固化到这里，
+  /// 下次开书直接可用，不再逐个试字典或弹框。
+  final String? password;
+
   @override
   Map<String, dynamic> toJson() => {
         'type': 'webdavArchive',
@@ -149,6 +155,7 @@ final class WebDavArchiveSource extends BookSource {
         'archiveUrl': archiveUrl,
         'archiveName': archiveName,
         if (archiveSize != null) 'archiveSize': archiveSize,
+        if (password != null && password!.isNotEmpty) 'pw': password,
       };
 }
 

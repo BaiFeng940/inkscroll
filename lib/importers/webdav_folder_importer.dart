@@ -124,10 +124,10 @@ class WebDavFolderImporter implements Importer {
 
   /// 最多嗅探多少张图的真实尺寸（其余用中位数估算）
   ///
-  /// ★ 从 16 降到 4：同一个漫画文件夹里的图几乎总是同一个尺寸，
-  /// 16 次 Range 请求换来的精度提升微乎其微，代价却是每本书多十几倍
-  /// 的往返。实测大库（100 本）导入时，这一项就能省下几十秒。
-  static const int sniffSamples = 4;
+  /// ★ 16 → 4 → 2：同一文件夹里的图几乎总是同一尺寸，
+  /// 少量 Range 请求换来的精度提升微乎其微，代价却是每本书的往返。
+  /// 估算偏差由阅读器解码后自愈，导入速度优先。
+  static const int sniffSamples = 2;
 
   /// 同时进行的 Range 嗅探并发数。
   ///
@@ -542,79 +542,9 @@ class WebDavFolderImporter implements Importer {
   /// 合集内部的并发扫描路数。
   ///
   /// 一个合集下常常有几十话，串行 PROPFIND 会把首尾相接的
-  /// 往返延迟直接累加；这里并发 4，配合连接池 12 刚好不排队。
-  static const int nestedScanConcurrency = 4;
-
-  /// 合集名清洗：去掉「合集」二字，再把**前后**成对的各类括号组剥掉。
-  ///
-  /// 例：`（XX）合集` → `XX`；`【XX】合集（完）` → `XX`；`XX合集[01-99]` → `XX`。
-  /// 规则：
-  ///   1. 先去掉「合集」二字；
-  ///   2. 反复剥掉尾随/开头的**完整成对**括号组（最多 3 轮），
-  ///      只剥完整对，避免把「XX（全）」这种撕成残缺文本；
-  ///   3. 剥完为空则回退原名（目录就叫「合集」时不误删成空）。
-  ///
-  /// 支持的括号：全角/半角圆括号、方括号、花括号、书名号、直角/单双引号角标。
-  static String stripCollectionMarkers(String raw) {
-    final fallback = raw.trim();
-    var s = raw.replaceAll('合集', '').trim();
-    const opens = ['（', '(', '「', '『', '【', '[', '《', '〔', '｛', '{'];
-    const closes = ['）', ')', '」', '』', '】', ']', '》', '〕', '｝', '}'];
-
-    // 尾随括号组：`XX（完）` → `XX`（组内非空才剥）
-    String? stripTrailingGroup(String t) {
-      for (var i = 0; i < closes.length; i++) {
-        if (t.endsWith(closes[i])) {
-          final start = t.lastIndexOf(opens[i]);
-          if (start > 0) {
-            final inner = t.substring(start + 1, t.length - 1);
-            if (inner.trim().isNotEmpty) return t.substring(0, start).trim();
-          }
-        }
-      }
-      return null;
-    }
-
-    // 开头括号组：仅当**整串**就是这一组时整组摘除（`【XX】（完）` 先剥尾组再剥头组）
-    String? stripLeadingGroup(String t) {
-      for (var i = 0; i < opens.length; i++) {
-        if (t.startsWith(opens[i])) {
-          final end = t.indexOf(closes[i]);
-          if (end == t.length - 1) {
-            final inner = t.substring(1, end).trim();
-            if (inner.isNotEmpty) return inner;
-          }
-        }
-      }
-      return null;
-    }
-
-    for (var round = 0; round < 3; round++) {
-      final before = s;
-      s = stripTrailingGroup(s) ?? s;
-      s = stripLeadingGroup(s) ?? s;
-      if (s == before || s.isEmpty) break;
-    }
-    return s.isEmpty ? fallback : s;
-  }
-
-  /// 合集里的一本书该叫什么名字。
-  ///
-  /// 现实命名：`漫画根目录/XX合集/第一话/`。只取「第一话」的话，库里有
-  /// 几十本「第一话」「第二话」，完全分不清谁是谁。规则：
-  ///   1. 合集名走 [stripCollectionMarkers]：去「合集」+ 剥前后括号组；
-  ///   2. 拼成 `合集名 子名`；
-  ///   3. 子名如果已经以合集名开头（重复部分），不重复拼接；
-  ///   4. 压缩包去掉扩展名。
-  ///
-  /// 例：`（XX）合集` + `第一话` → `XX 第一话`
-  static String collectionBookName(String collection, String sub) {
-    final c = stripCollectionMarkers(collection);
-    if (c.isEmpty) return _stripArchiveExt(sub);
-    final s = _stripArchiveExt(sub);
-    if (s.startsWith(c)) return s;
-    return '$c $s';
-  }
+  /// 往返延迟直接累加。0.15.3 提到 8：maxConnectionsPerHost 已是 16，
+  /// 与导入 worker 池（8）对齐刚好不排队。
+  static const int nestedScanConcurrency = 8;
 
   static String _stripArchiveExt(String name) {
     var s = name.trim();
@@ -626,13 +556,22 @@ class WebDavFolderImporter implements Importer {
     return s;
   }
 
-  /// 合并合集之后，**整本书**叫什么名字。
+  /// 合集里的一本书该叫什么名字（未合并模式，每话一本）。
   ///
-  /// 走 [stripCollectionMarkers]：去「合集」二字 + 剥前后括号组。
-  /// 例：`XX合集` → `XX`；`（XX）合集` → `XX`。剥完为空（目录就叫「合集」）则原样保留。
-  static String collectionTitle(String collection) {
-    final c = stripCollectionMarkers(collection);
-    return c.isEmpty ? collection.trim() : c;
+  /// ★ 0.15.3 删掉了旧的 stripCollectionMarkers 过滤链（去「合集」二字、
+  ///   剥前后括号组）——用户要求名称原样展示。现在：
+  ///   1. 合集名 = 文件夹名**原样**（`A合集` 就叫 `A合集`）；
+  ///   2. 拼成 `合集名 子名`；
+  ///   3. 子名已以合集名开头（重复部分）则不重复拼接；
+  ///   4. 压缩包去掉扩展名。
+  ///
+  /// 例：`A合集` + `第一话.zip` → `A合集 第一话`
+  static String collectionBookName(String collection, String sub) {
+    final c = collection.trim();
+    if (c.isEmpty) return _stripArchiveExt(sub);
+    final s = _stripArchiveExt(sub);
+    if (s.startsWith(c)) return s;
+    return '$c $s';
   }
 
   /// 扫描一个直接子目录，返回它内部的书（可能是 1 本、多本、或 0 本）。
@@ -687,7 +626,8 @@ class WebDavFolderImporter implements Importer {
       if (chapters.isNotEmpty) {
         out.add(WebDavComicCandidate(
           url: dirUrl,
-          name: collectionTitle(dirName),
+          // ★ 0.15.3 删掉名称过滤：合集书名 = 文件夹名原样（如「XX合集」）
+          name: dirName.trim(),
           images: const [],
           chapters: chapters,
         ));
@@ -740,6 +680,7 @@ class WebDavFolderImporter implements Importer {
           if (subImages.isNotEmpty) {
             list.add(WebDavComicCandidate(
               url: sub.url,
+              // ★ 未合并模式的每话书名带合集上下文：`A合集 第一话`（原名拼接，不过滤）
               name: collectionBookName(dirName, sub.name),
               images: subImages,
             ));
@@ -906,6 +847,10 @@ class WebDavFolderImporter implements Importer {
     }
   }
 
+  /// 各话并行构建的路数。6 路 × 每话内部 2~3 路抽样并发，
+  /// 总在飞请求约 20 个，maxConnectionsPerHost(16) 内基本不排队。
+  static const int chapterBuildConcurrency = 6;
+
   /// 把一个**合集**候选构造成"一本书 = 各话章节"的 Document。
   ///
   /// 逐话复用 [_build]（`ctx` 传 null：没有进度回调，也不需要 ImportContext），
@@ -918,30 +863,72 @@ class WebDavFolderImporter implements Importer {
     required WebDavConnection conn,
     required WebDavClient client,
     required WebDavComicCandidate candidate,
+    List<String> archivePasswordGuesses = const [],
   }) async {
-    final parts = <({String title, Document document})>[];
-    for (final ch in candidate.chapters) {
-      final Document doc;
-      if (ch.isArchive) {
-        // 一话是一个网盘上的压缩包：只读中央目录 + 抽样，不解压整包
-        doc = await WebDavArchiveImporter.buildDocument(
-          client: client,
-          connectionId: conn.id,
-          archiveUrl: ch.url,
-          archiveName: ch.title,
-          knownSize: ch.archiveSize,
-        );
-      } else {
-        doc = await _build(
-          ctx: null,
-          client: client,
-          conn: conn,
-          folderUrl: ch.url,
-          folderName: ch.title,
-          images: ch.images,
-        );
+    // ★ 各话并行构建（0.15.3 前是串行）：每话的「中央目录 + 尺寸抽样」
+    //   都是独立的网络往返，几十话串行就是把延迟逐话累加 —— 这是
+    //   合集导入慢的主要来源。结果按原始下标放回 slots，章节顺序
+    //   仍是目录名自然序。
+    final slots = List<({String title, Document document})?>.filled(
+      candidate.chapters.length,
+      null,
+    );
+    final failedTitles = <String>[];
+    Object? firstError;
+    var nextChapter = 0;
+
+    Future<void> chapterWorker() async {
+      while (true) {
+        final i = nextChapter++;
+        if (i >= candidate.chapters.length) return;
+        final ch = candidate.chapters[i];
+        try {
+          final Document doc;
+          if (ch.isArchive) {
+            // 一话是一个网盘上的压缩包：只读中央目录 + 抽样，不解压整包。
+            // 加密话：书源密码 → 密码字典 逐个试（0.15.3）。
+            final (d, _) =
+                await WebDavArchiveImporter.buildDocumentWithGuesses(
+              client: client,
+              connectionId: conn.id,
+              archiveUrl: ch.url,
+              archiveName: ch.title,
+              knownSize: ch.archiveSize,
+              guesses: archivePasswordGuesses,
+            );
+            doc = d;
+          } else {
+            doc = await _build(
+              ctx: null,
+              client: client,
+              conn: conn,
+              folderUrl: ch.url,
+              folderName: ch.title,
+              images: ch.images,
+            );
+          }
+          slots[i] = (title: ch.title, document: doc);
+        } catch (e) {
+          // 单话失败不再炸掉整本合集（旧行为是整本导入失败）：跳过这
+          // 一话继续；全部失败时把首个错误抛出去，导入摘要能看到原因。
+          failedTitles.add(ch.title);
+          firstError ??= e;
+        }
       }
-      parts.add((title: ch.title, document: doc));
+    }
+
+    final chapterWorkers = math.min(
+      chapterBuildConcurrency,
+      math.max(1, candidate.chapters.length),
+    );
+    await Future.wait(List.generate(chapterWorkers, (_) => chapterWorker()));
+
+    final parts = <({String title, Document document})>[
+      for (final s in slots)
+        if (s != null) s,
+    ];
+    if (parts.isEmpty && firstError != null) {
+      throw firstError!; // 一话都没建成：把真实原因交给导入流程
     }
     return mergeDocuments(
       connId: conn.id,

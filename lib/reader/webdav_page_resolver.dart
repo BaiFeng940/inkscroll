@@ -85,6 +85,7 @@ class WebDavPageByteResolver implements PageByteResolver {
       archiveUrl: ref.archiveUrl,
       cacheDir: cacheDir,
       pages: _pages,
+      password: ref.password,
     );
     _archiveResolvers[ref.archiveUrl] = created;
     return created;

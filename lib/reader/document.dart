@@ -104,6 +104,7 @@ final class WebDavArchiveRef extends ContentRef {
     required this.connectionId,
     required this.archiveUrl,
     required this.entryPath,
+    this.password,
   });
 
   final String connectionId;
@@ -113,6 +114,10 @@ final class WebDavArchiveRef extends ContentRef {
 
   /// 包内路径（例如 `第01话/001.jpg`）
   final String entryPath;
+
+  /// 加密包（ZipCrypto）的密码。随页引用持久化：合并合集里的加密话
+  /// 也能直接翻页，不用重新试字典。
+  final String? password;
 
   @override
   String toString() =>
