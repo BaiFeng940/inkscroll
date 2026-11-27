@@ -28,6 +28,7 @@ import '../../data/models/book_meta.dart';
 import '../../data/models/reader_settings.dart';
 import '../../data/prefs_store.dart';
 import '../../reader/document.dart';
+import '../../reader/document_codec.dart';
 import '../../reader/page_cache.dart';
 import '../../reader/reader_controller.dart';
 import 'height_jump_compensator.dart';
@@ -157,6 +158,15 @@ class _ReaderScreenState extends State<ReaderScreen>
       // 跳转/切模式时除了复位仲裁器状态，还要把真实矩阵一并归零
       controller.onZoomReset = () => _zoomHost.jumpTo(Matrix4.identity());
 
+      // 进度保存时把真实页高一起写回文档缓存（见 persistDocument 注释）
+      if (widget.store != null) {
+        final bookDir = widget.store!.bookDir(widget.book.id);
+        controller.persistDocument = () async {
+          final doc = controller.document;
+          if (doc != null) await DocumentCodec.save(bookDir, doc);
+        };
+      }
+
       // 默认模式：这本书上次用过的 > 用户在设置里指定的 > 按内容自动判断
       final remembered = widget.settings.lastModePerBook[widget.book.id];
       controller.mode = remembered ??
@@ -271,6 +281,10 @@ class _ReaderScreenState extends State<ReaderScreen>
     await _bootstrap();
   }
 
+  /// 「回到上次阅读位置」的恢复重试计数：SliverList 首次 layout 完成
+  /// 前 maxScrollExtent 可能还盖不住目标位置，等一帧再试，最多 ~10 帧。
+  int _restoreAttempts = 0;
+
   ReadingMode _defaultModeFor(Document doc) {
     switch (doc.hint) {
       case DocumentLayoutHint.webtoonPreferred:
@@ -286,23 +300,84 @@ class _ReaderScreenState extends State<ReaderScreen>
     final c = _controller;
     if (c == null || c.document == null) return;
 
+    // 设置开关：关闭时直接从第一页开始，不做任何跳转。
+    // 阅读中的进度照常记录，重新打开开关即可恢复续读。
+    if (!widget.settings.resumeLastPosition) return;
+
     final width = MediaQuery.sizeOf(context).width;
     c.rebuildMetricsIfNeeded(width);
 
     if (c.mode.isVertical) {
       final m = c.metrics;
-      if (m == null || !_verticalScroll.hasClients) return;
-      final y = m
-          .pixelFor(c.progress.pageIndex, c.progress.ratioInPage)
-          .clamp(0.0, _verticalScroll.position.maxScrollExtent);
-      _verticalScroll.jumpTo(y);
-      c.updateScrollOffset(y);
+      if (m != null && _verticalScroll.hasClients) {
+        final page = c.progress.pageIndex.clamp(0, c.pageCount - 1);
+        final target = m.pixelFor(page, c.progress.ratioInPage);
+        final max = _verticalScroll.position.maxScrollExtent;
+        // 目标位置超出现有可滚动范围 → 页高估算还没落地，等一帧重试；
+        // 重试上限用完后就地 clamp 恢复（宁可近似位置，也不静默失败）。
+        if (target > max + 1.0 && _restoreAttempts < 10) {
+          _restoreAttempts++;
+          WidgetsBinding.instance
+              .addPostFrameCallback((_) => _restoreProgress());
+          return;
+        }
+        final y = target.clamp(0.0, max);
+        if (y > 0) {
+          _verticalScroll.jumpTo(y);
+          c.updateScrollOffset(y);
+          _showResumedHint();
+        }
+      } else if (_restoreAttempts < 10) {
+        _restoreAttempts++;
+        WidgetsBinding.instance.addPostFrameCallback((_) => _restoreProgress());
+      }
     } else {
       final p = _horizontalPager;
       if (p != null && p.hasClients) {
-        p.jumpToPage(c.progress.pageIndex.clamp(0, c.pageCount - 1));
+        final page = c.progress.pageIndex.clamp(0, c.pageCount - 1);
+        if (page > 0) {
+          p.jumpToPage(page);
+          _showResumedHint();
+        }
+      } else if (_restoreAttempts < 10) {
+        _restoreAttempts++;
+        WidgetsBinding.instance.addPostFrameCallback((_) => _restoreProgress());
       }
     }
+  }
+
+  /// 恢复成功后的轻提示：不走 SnackBar（会挤动沉浸式布局），
+  /// 直接往 Overlay 挂一个自动消失的小胶囊。
+  void _showResumedHint() {
+    final overlay = Overlay.of(context, rootOverlay: true);
+    late final OverlayEntry entry;
+    entry = OverlayEntry(
+      builder: (_) => Positioned(
+        bottom: 96,
+        left: 0,
+        right: 0,
+        child: IgnorePointer(
+          child: Center(
+            child: Container(
+              padding:
+                  const EdgeInsets.symmetric(horizontal: 16, vertical: 10),
+              decoration: BoxDecoration(
+                color: Colors.black.withValues(alpha: 0.85),
+                borderRadius: BorderRadius.circular(24),
+              ),
+              child: const Text(
+                '已回到上次阅读位置',
+                style: TextStyle(color: Colors.white70, fontSize: 13),
+              ),
+            ),
+          ),
+        ),
+      ),
+    );
+    overlay.insert(entry);
+    Future.delayed(const Duration(milliseconds: 1600), () {
+      if (entry.mounted) entry.remove();
+    });
   }
 
   @override

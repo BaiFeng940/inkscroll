@@ -12,6 +12,8 @@
 ///   · 关于
 library;
 
+import 'dart:async';
+
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 
@@ -383,6 +385,17 @@ class _SettingsScreenState extends State<SettingsScreen> {
             subtitle: Text(_modeLabel(app.settings.defaultMode)),
             trailing: const Icon(Icons.chevron_right),
             onTap: () => _pickDefaultMode(app),
+          ),
+
+          SwitchListTile(
+            secondary: const Icon(Icons.bookmark_border),
+            title: const Text('打开时回到上次阅读位置'),
+            subtitle: const Text(
+                '关闭后每次从第一页开始；进度仍会记录，重新开启即可续读'),
+            value: app.settings.resumeLastPosition,
+            onChanged: (v) => unawaited(
+              app.updateSettings(app.settings.copyWith(resumeLastPosition: v)),
+            ),
           ),
 
           const Divider(height: 24),

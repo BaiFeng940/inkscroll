@@ -105,6 +105,13 @@ class ReaderController extends ChangeNotifier {
   ReadingProgress get progress => _progress;
 
   bool _disposed = false;
+
+  /// 本次开书以来是否真的读过（滚动/翻页过）。
+  ///
+  /// 没读过就退出时不能把保存的进度覆盖成第一页 —— 否则
+  /// 「打开看了一眼就退出」会把书签抹掉。
+  bool _progressTouched = false;
+
   Timer? _saveDebounce;
 
   /// 每个模式各自记住的位置
@@ -131,7 +138,11 @@ class ReaderController extends ChangeNotifier {
           (_perModeProgress.isEmpty
               ? const ReadingProgress()
               : _perModeProgress.values.first);
-      _progress = saved;
+      // 「回到上次阅读位置」关闭：地图照常加载（切模式时还能用），
+      // 但当前进度归零 —— 从第一页开始，页码标签也不能显示旧位置。
+      _progress = settings.resumeLastPosition
+          ? saved
+          : ReadingProgress(mode: mode, chapterIndex: saved.chapterIndex);
       _updateProgressNotifier();
 
       status = ReaderStatus.ready;
@@ -172,6 +183,7 @@ class ReaderController extends ChangeNotifier {
   void updateScrollOffset(double y) {
     final m = metrics;
     if (m == null || m.pageCount == 0) return;
+    _progressTouched = true;
 
     final pageIndex = m.pageAt(y);
     _progress = _progress.copyWith(
@@ -192,6 +204,7 @@ class ReaderController extends ChangeNotifier {
   void updatePageIndex(int pageIndex) {
     final doc = document;
     if (doc == null || doc.pageCount == 0) return;
+    _progressTouched = true;
 
     final denom = doc.pageCount <= 1 ? 1 : doc.pageCount - 1;
     _progress = _progress.copyWith(
@@ -840,13 +853,26 @@ class ReaderController extends ChangeNotifier {
     });
   }
 
+  /// 由 UI 层注入：与进度同步把文档落盘。
+  ///
+  /// 阅读中被真实解码校正过的页高（backfillAspect → applyAspect）
+  /// 只存在内存里；不落盘的话，下次打开会用导入时的估算页高重建度量，
+  /// 坐标系与退出时不一致 —— 按页号+页内比例重算出的像素位置会漂移
+  /// （实测：退出在第 11 页，重开回到第 10 页）。把学到的真实页高
+  /// 写回缓存 JSON 后，重开的度量与退出时一致，续读位置就是精确位置。
+  Future<void> Function()? persistDocument;
+
   Future<void> saveNow() async {
     if (_disposed) return;
     try {
-      _perModeProgress[mode] =
-          _progress.copyWith(updatedAt: DateTime.now(), mode: mode);
-      await prefs.saveAllProgress(book.id, _perModeProgress);
+      if (_progressTouched) {
+        _perModeProgress[mode] =
+            _progress.copyWith(updatedAt: DateTime.now(), mode: mode);
+        await prefs.saveAllProgress(book.id, _perModeProgress);
+      }
       await prefs.touchBook(book.id);
+      // 真实页高与进度一起落盘；失败不影响进度保存
+      await persistDocument?.call();
     } catch (_) {
       // 进度保存失败不应该影响阅读
     }
@@ -860,10 +886,13 @@ class ReaderController extends ChangeNotifier {
 
   @override
   void dispose() {
+    // ★ 退出前强制保存一次（不能只依赖防抖计时器）。
+    //   必须在置 _disposed **之前**调用：saveNow 开头有 `if (_disposed) return`
+    //   守卫，先置位会让这次保存变成空操作 —— 退出前最后 ≤400ms 的
+    //   阅读位置就只能靠防抖计时器碰运气了。
+    unawaited(saveNow());
     _disposed = true;
     _saveDebounce?.cancel();
-    // ★ 退出前强制保存一次（不能只依赖防抖计时器）
-    unawaited(saveNow());
     verticalScroll?.removeListener(_onVerticalScroll);
     knownPageHeights.clear();
     arbiter.removeListener(_onArbiterChanged);

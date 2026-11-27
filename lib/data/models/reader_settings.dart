@@ -122,6 +122,7 @@ class ReaderSettings {
     this.pageTurnAnim = PageTurnAnim.normal,
     this.highRefreshMode = HighRefreshMode.max,
     this.reserveTopInset = true,
+    this.resumeLastPosition = true,
     this.themeMode = ThemeMode.system,
     this.lastModePerBook = const {},
     this.defaultMode,
@@ -151,6 +152,12 @@ class ReaderSettings {
   /// 避免第一页顶部被通知栏或其他组件遮挡
   final bool reserveTopInset;
 
+  /// 打开书时自动跳回上次阅读位置（书签续读）。
+  ///
+  /// 关闭后每次从第一页开始；阅读中的进度仍会照常记录，
+  /// 重新打开开关就能继续上次的进度。
+  final bool resumeLastPosition;
+
   final ThemeMode themeMode;
 
   /// 每本书最后使用的模式：bookId -> mode
@@ -176,6 +183,7 @@ class ReaderSettings {
     PageTurnAnim? pageTurnAnim,
     HighRefreshMode? highRefreshMode,
     bool? reserveTopInset,
+    bool? resumeLastPosition,
     ThemeMode? themeMode,
     Map<String, ReadingMode>? lastModePerBook,
     ReadingMode? defaultMode,
@@ -194,6 +202,7 @@ class ReaderSettings {
       pageTurnAnim: pageTurnAnim ?? this.pageTurnAnim,
       highRefreshMode: highRefreshMode ?? this.highRefreshMode,
       reserveTopInset: reserveTopInset ?? this.reserveTopInset,
+      resumeLastPosition: resumeLastPosition ?? this.resumeLastPosition,
       themeMode: themeMode ?? this.themeMode,
       lastModePerBook: lastModePerBook ?? this.lastModePerBook,
       // 用 clearDefaultMode 显式表达"恢复自动"，因为 null 也是有效值
@@ -214,6 +223,7 @@ class ReaderSettings {
         'pageTurnAnim': pageTurnAnim.name,
         'highRefreshMode': highRefreshMode.name,
         'reserveTopInset': reserveTopInset,
+        'resumeLastPosition': resumeLastPosition,
         'themeMode': themeMode.name,
         'lastModePerBook': lastModePerBook.map((k, v) => MapEntry(k, v.name)),
         if (defaultMode != null) 'defaultMode': defaultMode!.name,
@@ -235,6 +245,7 @@ class ReaderSettings {
           PageTurnAnim.values, json['pageTurnAnim'], PageTurnAnim.normal),
       highRefreshMode: _refreshModeFromName(json['highRefreshMode']),
       reserveTopInset: json['reserveTopInset'] as bool? ?? true,
+      resumeLastPosition: json['resumeLastPosition'] as bool? ?? true,
       themeMode:
           _enumByName(ThemeMode.values, json['themeMode'], ThemeMode.system),
       lastModePerBook: ((json['lastModePerBook'] as Map?) ?? const {})
