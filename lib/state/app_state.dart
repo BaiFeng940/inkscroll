@@ -29,6 +29,7 @@ import '../data/display_channel.dart';
 import '../data/import_lock.dart';
 import '../data/prefs_store.dart';
 import '../data/update_service.dart';
+import '../data/webdav/webdav_client.dart';
 import '../data/webdav/webdav_connection.dart';
 import '../importers/import_router.dart';
 import '../importers/webdav_archive_importer.dart';
@@ -192,6 +193,11 @@ class AppState extends ChangeNotifier {
           existing.add(keyOf(src.connectionId, src.folderUrl));
         } else if (src is WebDavArchiveSource) {
           existing.add(keyOf(src.connectionId, src.archiveUrl));
+        } else if (src is WebDavMergedSource) {
+          // 同名合并书：成员 URL 都算「已导入」，重新扫描时直接跳过
+          for (final m in src.members) {
+            existing.add(keyOf(src.connectionId, m.url));
+          }
         }
       }
 
@@ -220,6 +226,10 @@ class AppState extends ChangeNotifier {
       final imported = <BookMeta>[];
       final failures = <String>[];
       final pending = <BookMeta>[];
+
+      // 同名合并计数（进入锁后赋值；finally 的摘要里展示）
+      var mergedGroupCount = 0;
+      var appendedSameName = 0;
 
       // 防重入：连点两次「添加为库」会并发跑两轮，两轮都先去重再写盘，
       // 结果就是每本都进两次。真机上的 373 本有一部分是这么来的。
@@ -257,6 +267,27 @@ class AppState extends ChangeNotifier {
 
       final locked = await acquireImportLock();
       try {
+        // ── 同名漫画自动合并 ──
+        //
+        // ① 跨批追加：新候选与已导入的同名书（同连接、成员语义来源）合并；
+        // ② 组内合并：同批新候选里归一化标题相同的合成一本（每来源一章）。
+        // 任一步失败都把候选退回普通导入路径，不影响主流程。
+        var importList = fresh;
+        try {
+          final merged = await _applySameNameMerge(
+            connection: connection,
+            client: client,
+            fresh: fresh,
+            guesses: zipPasswords,
+          );
+          importList = merged.list;
+          mergedGroupCount = merged.groups;
+          appendedSameName = merged.appended;
+        } catch (e) {
+          // 合并阶段任何异常都回退为不合并导入，不让同名合并阻断导入主流程
+          importList = fresh;
+        }
+
         // ── 并发导入 ──
         //
         // 之前是串行：一本 2~3 秒，170 本就要 7 分钟，用户全程干等。
@@ -269,7 +300,7 @@ class AppState extends ChangeNotifier {
         // 并发度取 4：再高会被 HttpClient 的 maxConnectionsPerHost（6）
         // 排队，且更容易触碰网盘的软限流。每本书内部还有自己的抽样并发，
         // 因此实际同时在飞的请求约为 4 × 3 ≈ 12 个。
-        final results = List<BookMeta?>.filled(fresh.length, null);
+        final results = List<BookMeta?>.filled(importList.length, null);
         var nextIndex = 0;
         var finished = 0;
 
@@ -278,8 +309,8 @@ class AppState extends ChangeNotifier {
         Future<void> worker() async {
           while (true) {
             final i = nextIndex++;
-            if (i >= fresh.length) return;
-            final c = fresh[i];
+            if (i >= importList.length) return;
+            final c = importList[i];
             final localBatch = <BookMeta>[];
             try {
               if (c.isCollection) {
@@ -294,18 +325,42 @@ class AppState extends ChangeNotifier {
                   candidate: c,
                   archivePasswordGuesses: zipPasswords,
                 );
-                // 来源记**合集目录**：既方便之后判重，也让重建文档时
-                // 能顺着这个目录再扫出各话（见 buildDocument 的兜底）。
-                final pick = SourcePick(
-                  kind: SourcePickKind.webdav,
-                  displayName: c.name,
-                  sourceId: ByteStore.newBookId(),
-                  uri: Uri.tryParse(c.url),
-                  webdavConnectionId: connection.id,
-                  webdavFolderUrl: c.url,
-                  webdavFolderName: c.name,
-                );
-                results[i] = await _persist(pick, doc, batch: localBatch);
+                if (c.mergedMembers != null) {
+                  // ★ 同名合并书：书源记成员列表（判重与兜底重建都以成员
+                  //   为准）。SourcePick 只能指向一个目录，不适用。
+                  final bookId = ByteStore.newBookId();
+                  await DocumentCodec.save(store.bookDir(bookId), doc);
+                  final meta = BookMeta(
+                    id: bookId,
+                    title: c.name,
+                    kind: BookKind.comic,
+                    source: WebDavMergedSource(
+                      connectionId: connection.id,
+                      rootUrl: folderUrl,
+                      members: c.mergedMembers!,
+                    ),
+                    pageCount: doc.pageCount,
+                    chapterCount: doc.chapterCount,
+                    importedAt: DateTime.now(),
+                    description:
+                        doc.warnings.isEmpty ? null : doc.warnings.join('\n'),
+                  );
+                  localBatch.add(meta);
+                  results[i] = meta;
+                } else {
+                  // 来源记**合集目录**：既方便之后判重，也让重建文档时
+                  // 能顺着这个目录再扫出各话（见 buildDocument 的兜底）。
+                  final pick = SourcePick(
+                    kind: SourcePickKind.webdav,
+                    displayName: c.name,
+                    sourceId: ByteStore.newBookId(),
+                    uri: Uri.tryParse(c.url),
+                    webdavConnectionId: connection.id,
+                    webdavFolderUrl: c.url,
+                    webdavFolderName: c.name,
+                  );
+                  results[i] = await _persist(pick, doc, batch: localBatch);
+                }
               } else if (c.isArchive) {
                 // ★ 网盘上的压缩包：一本书 = 一个包。
                 //   只读中央目录 + 少量样本，不解压整包。
@@ -375,16 +430,16 @@ class AppState extends ChangeNotifier {
             finished++;
             final label = '${c.name}（${c.pageCount} 页）';
             _setProgress(
-              0.4 + 0.6 * (finished / fresh.length),
-              '正在导入 $finished/${fresh.length}：$label',
+              0.4 + 0.6 * (finished / importList.length),
+              '正在导入 $finished/${importList.length}：$label',
             );
-            onImportProgress?.call(finished, fresh.length, label);
+            onImportProgress?.call(finished, importList.length, label);
           }
         }
 
         final workerCount = math.min(
           _archiveImportConcurrency,
-          math.max(1, fresh.length),
+          math.max(1, importList.length),
         );
         await Future.wait(List.generate(workerCount, (_) => worker()));
 
@@ -412,7 +467,9 @@ class AppState extends ChangeNotifier {
 
         lastImportSummary = '$lastImportSummary；成功 ${imported.length} 本'
             '，失败 ${failures.length} 个'
-            '${failures.isEmpty ? '' : '（首个：${failures.first}）'}';
+            '${failures.isEmpty ? '' : '（首个：${failures.first}）'}'
+            '${mergedGroupCount > 0 ? '；同名合并 $mergedGroupCount 组' : ''}'
+            '${appendedSameName > 0 ? '；向同名书追加 $appendedSameName 章' : ''}';
         // 整批结束后在后台顺序补封面（只补可见的，见 ensureAllCovers 注释）
         ensureAllCovers();
       }
@@ -445,7 +502,9 @@ class AppState extends ChangeNotifier {
 
   /// 这本书是"在线库"（来自 NAS）还是"本地库"
   static bool isOnline(BookMeta b) =>
-      b.source is WebDavSource || b.source is WebDavArchiveSource;
+      b.source is WebDavSource ||
+      b.source is WebDavArchiveSource ||
+      b.source is WebDavMergedSource;
 
   /// 本地库：文件夹 / 压缩包 / 散图导入的书
   List<BookMeta> get localBooks {
@@ -1362,6 +1421,73 @@ class AppState extends ChangeNotifier {
           ),
         );
 
+      case WebDavMergedSource(
+          :final connectionId,
+          :final rootUrl,
+          :final members
+        ):
+        // 同名合并书：缓存丢失时按成员逐个重建再拼接。
+        final conn = webdavConnections.byId(connectionId);
+        if (conn == null) {
+          throw const GenericError(
+            '这条网盘连接已被删除。\n请重新添加网盘后再次导入这本书。',
+          );
+        }
+        final client = conn.createClient();
+        final parts = <({String title, Document document})>[];
+        try {
+          for (final m in members) {
+            try {
+              final Document d;
+              if (m.isArchive) {
+                final (doc, _) =
+                    await WebDavArchiveImporter.buildDocumentWithGuesses(
+                  client: client,
+                  connectionId: connectionId,
+                  archiveUrl: m.url,
+                  archiveName: m.name,
+                  knownSize: m.archiveSize,
+                  guesses: [
+                    if (m.password != null && m.password!.isNotEmpty)
+                      m.password!,
+                    ...zipPasswords,
+                  ],
+                );
+                d = doc;
+              } else {
+                d = await WebDavFolderImporter.buildDocument(
+                  connection: conn,
+                  folderUrl: m.url,
+                  folderName: m.name,
+                );
+              }
+              parts.add((title: m.name, document: d));
+            } catch (_) {
+              // 单成员失败跳过：其余成员还能读
+            }
+          }
+          if (parts.isEmpty) {
+            throw const GenericError('这本书的网盘来源都已无法访问。');
+          }
+          final doc = WebDavFolderImporter.mergeDocuments(
+            connId: connectionId,
+            collectionUrl: rootUrl.isEmpty ? members.first.url : rootUrl,
+            title: book.title,
+            parts: parts,
+          );
+          return (
+            document: doc,
+            resolver: WebDavPageByteResolver(
+              client: client,
+              cacheDir: Directory(store.webdavCacheDirFor(book.id)),
+              pageList: doc.pagesInOrder,
+            ),
+          );
+        } catch (_) {
+          client.close();
+          rethrow;
+        }
+
       case ArchiveSourceSpec(:final path):
         final src = await FileByteSource.open(path);
         // ★ 密码以**最新**的书源为准：密码可能在阅读器里刚补填过，
@@ -1404,6 +1530,271 @@ class AppState extends ChangeNotifier {
           ),
         );
     }
+  }
+
+  // ---------------------------------------------------------------------------
+  // 同名漫画自动合并
+  // ---------------------------------------------------------------------------
+
+  /// 书源的 WebDAV 连接 id（本地来源返回 null）。
+  String? _webdavConnectionOf(BookSource src) => switch (src) {
+        WebDavSource(:final connectionId) => connectionId,
+        WebDavArchiveSource(:final connectionId) => connectionId,
+        WebDavMergedSource(:final connectionId) => connectionId,
+        _ => null,
+      };
+
+  /// 已导入书可作合并目标的成员列表；null = 来源没有成员语义（不合并）。
+  ///
+  /// [WebDavSource] 故意排除：它可能指向普通文件夹，也可能指向合集目录，
+  /// 不发一次 PROPFIND 无法区分 —— 保守起见不做合并目标。
+  List<WebDavMergedMember>? _mergeMembersOf(BookSource src) {
+    final s = src;
+    if (s is WebDavMergedSource) return s.members;
+    if (s is WebDavArchiveSource) {
+      return [
+        WebDavMergedMember(
+          url: s.archiveUrl,
+          name: s.archiveName,
+          isArchive: true,
+          archiveSize: s.archiveSize,
+          password: s.password,
+        ),
+      ];
+    }
+    return null;
+  }
+
+  /// 成员在章节菜单里的显示名：压缩包用 URL 末段（带后缀，
+  /// 「海贼王.zip / 海贼王 (1).zip」才能区分），文件夹用原名。
+  String _memberDisplayOf(WebDavComicCandidate c) {
+    if (c.isArchive) {
+      final segs = Uri.tryParse(c.url)?.pathSegments ?? const [];
+      if (segs.isNotEmpty) {
+        try {
+          final raw = Uri.decodeComponent(segs.last);
+          if (raw.isNotEmpty) return raw;
+        } catch (_) {
+          // url 是半编码/含裸 %（不同网盘实现不一）：退回原候选名
+          return c.name;
+        }
+      }
+    }
+    return c.name;
+  }
+
+  /// 同名合并主流程：返回处理后的导入列表与计数。
+  ///
+  /// ① 跨批追加：新候选与已导入的同名书（同连接、成员语义来源）合并；
+  /// ② 组内合并：同批新候选里归一化标题相同的合成一本。
+  /// 每一步失败都把候选退回普通导入路径，不影响主流程。
+  Future<({List<WebDavComicCandidate> list, int groups, int appended})>
+      _applySameNameMerge({
+    required WebDavConnection connection,
+    required WebDavClient client,
+    required List<WebDavComicCandidate> fresh,
+    required List<String> guesses,
+  }) async {
+    // ① 跨批追加
+    final remaining = <WebDavComicCandidate>[];
+    final appends = <({WebDavComicCandidate candidate, BookMeta book})>[];
+    for (final c in fresh) {
+      final key = WebDavFolderImporter.normalizeGroupTitle(c.name);
+      BookMeta? target;
+      for (final b in books) {
+        if (_webdavConnectionOf(b.source) != connection.id) continue;
+        if (_mergeMembersOf(b.source) == null) continue;
+        if (WebDavFolderImporter.normalizeGroupTitle(b.title) != key) {
+          continue;
+        }
+        target = b;
+        break;
+      }
+      if (target == null) {
+        remaining.add(c);
+      } else {
+        appends.add((candidate: c, book: target));
+      }
+    }
+
+    var appended = 0;
+    for (final a in appends) {
+      var ok = false;
+      try {
+        ok = await _appendMemberToBook(
+          connection: connection,
+          client: client,
+          book: a.book,
+          candidate: a.candidate,
+          guesses: guesses,
+        );
+      } catch (_) {
+        ok = false;
+      }
+      if (!ok) remaining.add(a.candidate); // 追加失败 → 退回普通导入
+      // 成功的候选已并入目标书，不再出现在导入列表里
+    }
+
+    // ② 组内合并（同一批新候选）
+    final groups = WebDavFolderImporter.groupCandidatesByTitle(remaining);
+    final list = <WebDavComicCandidate>[];
+    var mergedGroups = 0;
+    for (final g in groups) {
+      if (g.length == 1) {
+        list.add(g.first);
+        continue;
+      }
+      mergedGroups++;
+      final members = <WebDavMergedMember>[];
+      final chapters = <WebDavCollectionChapter>[];
+      for (final m in g) {
+        if (m.isCollection) {
+          // 合集成员摊平：每个「话」各占一章
+          for (final ch in m.chapters) {
+            members.add(WebDavMergedMember(
+              url: ch.url,
+              name: ch.title,
+              isArchive: ch.isArchive,
+              archiveSize: ch.archiveSize,
+            ));
+            chapters.add(ch);
+          }
+        } else {
+          final display = _memberDisplayOf(m);
+          members.add(WebDavMergedMember(
+            url: m.url,
+            name: display,
+            isArchive: m.isArchive,
+            archiveSize: m.archiveSize,
+          ));
+          chapters.add(WebDavCollectionChapter(
+            title: display,
+            url: m.url,
+            images: m.images,
+            isArchive: m.isArchive,
+            archiveSize: m.archiveSize,
+          ));
+        }
+      }
+      // 章节标题去重（同名成员在菜单里要能区分）
+      final fixedTitles = WebDavFolderImporter.dedupeTitles(
+          [for (final ch in chapters) ch.title]);
+      final fixedChapters = <WebDavCollectionChapter>[
+        for (var i = 0; i < chapters.length; i++)
+          WebDavCollectionChapter(
+            title: fixedTitles[i],
+            url: chapters[i].url,
+            images: chapters[i].images,
+            isArchive: chapters[i].isArchive,
+            archiveSize: chapters[i].archiveSize,
+          ),
+      ];
+      // 书名取组内最短的原样名：「海贼王」优于「海贼王 (1)」
+      final title =
+          g.reduce((a, b) => b.name.length < a.name.length ? b : a).name;
+      list.add(WebDavComicCandidate(
+        url: g.first.url,
+        name: title,
+        images: const [],
+        chapters: fixedChapters,
+        mergedMembers: members,
+      ));
+    }
+    return (list: list, groups: mergedGroups, appended: appended);
+  }
+
+  /// 把一个候选作为新章节追加到已有书。返回 false = 不能/不必追加
+  /// （候选已是书的成员、旧文档缓存丢失、新成员无页），
+  /// 调用方把候选退回普通导入。
+  Future<bool> _appendMemberToBook({
+    required WebDavConnection connection,
+    required WebDavClient client,
+    required BookMeta book,
+    required WebDavComicCandidate candidate,
+    required List<String> guesses,
+  }) async {
+    final members = _mergeMembersOf(book.source)!;
+    if (members.any((m) => m.url == candidate.url)) return false;
+
+    // 新成员文档
+    Document part;
+    String? goodPwd;
+    if (candidate.isArchive) {
+      final (d, pwd) = await WebDavArchiveImporter.buildDocumentWithGuesses(
+        client: client,
+        connectionId: connection.id,
+        archiveUrl: candidate.url,
+        archiveName: candidate.name,
+        knownSize: candidate.archiveSize,
+        guesses: guesses,
+      );
+      part = d;
+      goodPwd = pwd;
+    } else {
+      part = await WebDavFolderImporter.buildFromCandidate(
+        connection: connection,
+        candidate: candidate,
+        client: client,
+      );
+    }
+    if (part.pagesInOrder.isEmpty) return false;
+
+    // 旧文档缓存（丢失则放弃合并 → 普通导入）
+    final cached = await DocumentCodec.load(store.bookDir(book.id));
+    if (cached == null || cached.chapters.isEmpty) return false;
+
+    final display = _memberDisplayOf(candidate);
+    var title = display;
+    final used = {for (final ch in cached.chapters) ch.title};
+    if (used.contains(title)) {
+      var i = 2;
+      while (used.contains('$title ($i)')) {
+        i++;
+      }
+      title = '$title ($i)';
+    }
+
+    final merged = WebDavFolderImporter.appendDocumentPart(
+      cached,
+      title: title,
+      part: part,
+    );
+
+    final newSource = WebDavMergedSource(
+      connectionId: connection.id,
+      rootUrl: book.source is WebDavMergedSource
+          ? (book.source as WebDavMergedSource).rootUrl
+          : '',
+      members: [
+        ...members,
+        WebDavMergedMember(
+          url: candidate.url,
+          name: display,
+          isArchive: candidate.isArchive,
+          archiveSize: candidate.archiveSize,
+          password: goodPwd,
+        ),
+      ],
+    );
+    await DocumentCodec.save(store.bookDir(book.id), merged);
+    await _prefs.upsertBook(BookMeta(
+      id: book.id,
+      title: book.title,
+      kind: book.kind,
+      source: newSource,
+      pageCount: merged.pageCount,
+      chapterCount: merged.chapterCount,
+      importedAt: book.importedAt,
+      coverPath: book.coverPath,
+      author: book.author,
+      isFavorite: book.isFavorite,
+      lastReadAt: book.lastReadAt,
+      description:
+          merged.warnings.isEmpty ? null : merged.warnings.join('\n'),
+    ));
+    books = _prefs.loadBooks();
+    notifyListeners();
+    return true;
   }
 
   Future<ArchiveSource> _openArchive(

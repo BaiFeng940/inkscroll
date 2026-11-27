@@ -172,6 +172,22 @@ class _PageImageState extends State<PageImage> {
     try {
       // 传 PageNode 而不是 bytes —— 字节的获取与缓存全部由 resolver 负责
       final bytes = await widget.resolver.imageBytes(widget.page);
+
+      // ★ 真实尺寸回填必须**先于** mounted 检查：页在字节到达前被滑出
+      //   缓存窗口而销毁是常态（快速甩动 + NAS 延迟）。销毁后如果跳过
+      //   回填，这一页的真实比例就永远丢了 —— 下次进入缓存窗口又是
+      //   中位数估算占位 → 再解码 → 再跳变 → 再补偿，无限重复。
+      //   这正是「读到一半画面反复闪回（4↔3 来回跳）」的放大器
+      //   （0.15.3 嗅探降档后占位误差更大，触发更频繁）。回填走的是
+      //   controller 回调，生命周期长于本 widget，安全。
+      if (!_reportedDimension) {
+        _reportedDimension = true;
+        final dim = ImageHeaderParser.tryParse(bytes);
+        if (dim != null && dim.aspectRatio.isFinite && dim.aspectRatio > 0.02) {
+          widget.onDimensionResolved?.call(dim);
+        }
+      }
+
       if (!mounted) {
         return;
       }
@@ -180,16 +196,6 @@ class _PageImageState extends State<PageImage> {
         _error = null;
         _loading = false;
       });
-
-      // 顺手把真实尺寸报给上层，用于收敛百分比估算。
-      // 纯头部字节解析，成本极低，且只做一次。
-      if (!_reportedDimension) {
-        _reportedDimension = true;
-        final dim = ImageHeaderParser.tryParse(bytes);
-        if (dim != null && dim.aspectRatio.isFinite && dim.aspectRatio > 0.02) {
-          widget.onDimensionResolved?.call(dim);
-        }
-      }
     } catch (e) {
       if (!mounted) return;
       _loading = false;
@@ -293,6 +299,23 @@ class _PageImageState extends State<PageImage> {
       alignment: Alignment.topCenter,
       filterQuality: FilterQuality.medium,
       gaplessPlayback: true,
+      // ★★ 闪回 bug 的根修：字节就位 ≠ 解码就绪。
+      //   `Image` 在首帧解码完成前 RenderImage 是 **0 高**，长页模式下
+      //   这一页会在 SliverList 里塔缩成 0px —— 正在看的内容整体位移，
+      //   页码翻转；解码完成后页高恢复、内容又位移回去；页被窗口边缘
+      //   回收重建时再次塔缩……于是「第4页→第3页→第4页」无限循环。
+      //   旧占位链只保护了 bytes==null 阶段，没保护「bytes!=null 但
+      //   未解码」这个窗口（NAS 延迟 + 大图解码时长达几百毫秒）。
+      //   首帧未就绪时按已知比例占位，页高永不为 0。
+      frameBuilder: (ctx, child, frame, wasSync) {
+        if (frame != null) return child;
+        final ar = widget.page.aspectRatio;
+        if (ar != null && ar.isFinite && ar > 0.02 && ar < 50) {
+          return AspectRatio(
+              aspectRatio: ar, child: const _LoadingPlaceholder());
+        }
+        return const SizedBox(height: 240, child: _LoadingPlaceholder());
+      },
       errorBuilder: (ctx, err, st) => _ErrorPlaceholder(
         error: GenericError('图片解码失败：$err'),
         onRetry: null,

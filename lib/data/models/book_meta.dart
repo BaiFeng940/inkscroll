@@ -31,6 +31,15 @@ sealed class BookSource {
           archiveSize: json['archiveSize'] as int?,
           password: json['pw'] as String?,
         );
+      case 'webdavMerged':
+        return WebDavMergedSource(
+          connectionId: json['connectionId'] as String? ?? '',
+          rootUrl: json['rootUrl'] as String? ?? '',
+          members: [
+            for (final m in (json['members'] as List? ?? const []))
+              WebDavMergedMember.fromJson(m as Map<String, dynamic>),
+          ],
+        );
       case 'archive':
       default:
         return ArchiveSourceSpec(
@@ -156,6 +165,78 @@ final class WebDavArchiveSource extends BookSource {
         'archiveName': archiveName,
         if (archiveSize != null) 'archiveSize': archiveSize,
         if (password != null && password!.isNotEmpty) 'pw': password,
+      };
+}
+
+/// 同名合并书的成员：一个 WebDAV 上的文件夹或压缩包。
+///
+/// 合并书 = 这些成员各占一个章节。成员列表同时承担两个职责：
+/// 兜底重建（缓存文档丢失后逐成员重建再拼接）与判重（重新扫描时
+/// 成员 URL 已在库中则跳过）。
+class WebDavMergedMember {
+  const WebDavMergedMember({
+    required this.url,
+    required this.name,
+    this.isArchive = false,
+    this.archiveSize,
+    this.password,
+  });
+
+  /// 成员的绝对 URL（文件夹目录 / 压缩包文件）
+  final String url;
+
+  /// 显示名（章节标题来源；压缩包保留后缀以区分重复下载）
+  final String name;
+
+  final bool isArchive;
+  final int? archiveSize;
+
+  /// 加密包密码（导入时试出后固化）
+  final String? password;
+
+  Map<String, dynamic> toJson() => {
+        'u': url,
+        'n': name,
+        'a': isArchive,
+        if (archiveSize != null) 's': archiveSize,
+        if (password != null && password!.isNotEmpty) 'pw': password,
+      };
+
+  static WebDavMergedMember fromJson(Map<String, dynamic> json) =>
+      WebDavMergedMember(
+        url: json['u'] as String? ?? '',
+        name: json['n'] as String? ?? '',
+        isArchive: json['a'] as bool? ?? false,
+        archiveSize: json['s'] as int?,
+        password: json['pw'] as String?,
+      );
+}
+
+/// 网络上多个**同名来源**合并成的一本书（同名漫画自动合并）。
+///
+/// 例：网盘上同时存在 `海贼王.zip` 与 `海贼王.cbz`（或同名文件夹与包），
+/// 导入时合并为一本书，每个来源一个章节。缓存文档丢失时按成员重建。
+final class WebDavMergedSource extends BookSource {
+  const WebDavMergedSource({
+    required this.connectionId,
+    required this.rootUrl,
+    required this.members,
+  });
+
+  final String connectionId;
+
+  /// 导入时扫描的库根目录（记录用；兜底重建按成员进行，不重扫根目录）
+  final String rootUrl;
+
+  /// 成员列表（≥2；各占一章，顺序 = 合并时的章节顺序）
+  final List<WebDavMergedMember> members;
+
+  @override
+  Map<String, dynamic> toJson() => {
+        'type': 'webdavMerged',
+        'connectionId': connectionId,
+        'rootUrl': rootUrl,
+        'members': [for (final m in members) m.toJson()],
       };
 }
 

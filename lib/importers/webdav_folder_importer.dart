@@ -22,6 +22,7 @@ import 'dart:typed_data';
 import '../core/errors.dart';
 import '../core/image_header.dart';
 import '../data/importer.dart';
+import '../data/models/book_meta.dart';
 import '../data/webdav/webdav_client.dart';
 import '../data/webdav/webdav_connection.dart';
 import '../importers/import_utils.dart';
@@ -37,6 +38,7 @@ class WebDavComicCandidate {
     this.isArchive = false,
     this.archiveSize,
     this.chapters = const [],
+    this.mergedMembers,
   });
 
   /// 文件夹的绝对 URL
@@ -62,6 +64,13 @@ class WebDavComicCandidate {
   /// 非空即表示这一项是**一个合集**：一本书 = 这些 [WebDavCollectionChapter]。
   /// 关闭开关时这里永远是空的，扫描结果与以前完全一致。
   final List<WebDavCollectionChapter> chapters;
+
+  /// 同名合并组（仅导入层构造的合成候选携带，扫描层永远为 null）。
+  ///
+  /// 非空时这个候选代表「同名漫画自动合并」出的一本书：[chapters]
+  /// 里的每一章对应 [mergedMembers] 里的一个成员，导入完成后
+  /// 书源记为 [WebDavMergedSource]（兜底重建与判重都以成员为准）。
+  final List<WebDavMergedMember>? mergedMembers;
 
   /// 这一项是不是「一个合集 = 一本书」
   bool get isCollection => chapters.isNotEmpty;
@@ -483,7 +492,8 @@ class WebDavFolderImporter implements Importer {
     for (final a in archives) {
       out.add(WebDavComicCandidate(
         url: a.url,
-        name: a.name,
+        // 书名去掉压缩包后缀（.zip/.cbz）：库里显示「海贼王」而不是「海贼王.zip」
+        name: _stripArchiveExt(a.name),
         images: const [],
         isArchive: true,
         archiveSize: a.size,
@@ -548,9 +558,9 @@ class WebDavFolderImporter implements Importer {
 
   static String _stripArchiveExt(String name) {
     var s = name.trim();
-    for (final ext in const ['.zip', '.cbz', '.tar']) {
-      if (s.toLowerCase().endsWith(ext)) {
-        return s.substring(0, s.length - ext.length);
+    for (final ext in const ['.zip', '.cbz', '.tar', '.rar', '.7z', '.tgz', '.tar.gz']) {
+      if (s.toLowerCase().endsWith(ext) && s.length > ext.length) {
+        return s.substring(0, s.length - ext.length).trim();
       }
     }
     return s;
@@ -642,7 +652,7 @@ class WebDavFolderImporter implements Importer {
     for (final a in zips) {
       out.add(WebDavComicCandidate(
         url: a.url,
-        name: a.name,
+        name: _stripArchiveExt(a.name),
         images: const [],
         isArchive: true,
         archiveSize: a.size,
@@ -992,6 +1002,117 @@ class WebDavFolderImporter implements Importer {
       warnings: [
         if (chapters.isNotEmpty) '已把 ${chapters.length} 话合并成一本书，章节菜单里可切换。',
         '这些图片在网盘上，阅读时需要联网；看过的页会自动缓存到本地。',
+      ],
+    );
+  }
+
+  // ---------------------------------------------------------------------------
+  // 同名漫画自动合并（导入层）
+  // ---------------------------------------------------------------------------
+
+  /// 归一化「用于同名分组」的标题。只参与分组，不改变显示书名。
+  ///
+  /// 规则（按序）：
+  ///   1. 去掉压缩包后缀（.zip/.cbz/.tar/.rar/.7z/.tgz/.tar.gz）；
+  ///   2. 折叠连续空白为一个空格、去首尾；
+  ///   3. 去掉结尾的重复下载序号 `（1）`/`(1)`——浏览器/网盘重复下载时
+  ///      自动加的「名 (1)」是重复文件的最常见形态；序号只在去掉后
+  ///      仍非空时才剥，避免把「海贼王 (1)」这种真书名剥成空。
+  ///   4. 转小写（只影响拉丁字母；中日韩书名不受影响）。
+  static String normalizeGroupTitle(String name) {
+    var s = _stripArchiveExt(name);
+    s = s.replaceAll(RegExp(r'\s+'), ' ').trim();
+    final dup = RegExp(r'[（(]\s*\d+\s*[)）]$');
+    final m = dup.firstMatch(s);
+    if (m != null && m.start > 0) {
+      s = s.substring(0, m.start).trim();
+    }
+    return s.toLowerCase();
+  }
+
+  /// 章节标题去重：同名成员在章节菜单里无法区分，第 2 个起的重名追加
+  /// 「 (2)」「 (3)」。
+  static List<String> dedupeTitles(List<String> titles) {
+    final used = <String>{};
+    final out = <String>[];
+    for (final t in titles) {
+      var name = t.isEmpty ? '第 ${out.length + 1} 部分' : t;
+      if (used.contains(name)) {
+        var i = 2;
+        while (used.contains('$name ($i)')) {
+          i++;
+        }
+        name = '$name ($i)';
+      }
+      used.add(name);
+      out.add(name);
+    }
+    return out;
+  }
+
+  /// 纯函数：把候选按归一化标题分组（保持原始顺序；单元素组原样返回）。
+  ///
+  /// 分组只在**同一批导入的新候选**内进行；已导入书的追加（跨批合并）
+  /// 由调用方（AppState）处理。
+  static List<List<WebDavComicCandidate>> groupCandidatesByTitle(
+    List<WebDavComicCandidate> candidates,
+  ) {
+    final groups = <String, List<WebDavComicCandidate>>{};
+    final order = <String>[];
+    for (final c in candidates) {
+      final key = normalizeGroupTitle(c.name);
+      if (!groups.containsKey(key)) {
+        groups[key] = <WebDavComicCandidate>[];
+        order.add(key);
+      }
+      groups[key]!.add(c);
+    }
+    return [for (final k in order) groups[k]!];
+  }
+
+  /// 纯函数：把一个成员章节**追加**到既有文档末尾（跨批同名合并用）。
+  ///
+  /// 与 [mergeDocuments] 相同的页 id 前缀规则（`c{章号}_{原 id}`），
+  /// 章号从 [oldDoc] 的现有章节数起算 —— 旧章节的页 id 与阅读进度
+  /// 完全不动（进度按 pageIndex/chapterIndex 记录，末尾追加不影响）。
+  static Document appendDocumentPart(
+    Document oldDoc, {
+    required String title,
+    required Document part,
+  }) {
+    final pages = <String, PageNode>{...oldDoc.pages};
+    final chapters = [...oldDoc.chapters];
+    final chapterIndex = chapters.length;
+    final ids = <String>[];
+    for (final p in part.pagesInOrder) {
+      final id = 'c${chapterIndex}_${p.id}';
+      pages[id] = PageNode(
+        id: id,
+        kind: p.kind,
+        content: p.content,
+        aspectRatio: p.aspectRatio,
+        title: p.title,
+      );
+      ids.add(id);
+    }
+    if (ids.isEmpty) return oldDoc;
+    chapters.add(Chapter(
+      index: chapterIndex,
+      title: title,
+      pageIds: ids,
+    ));
+    return Document(
+      id: oldDoc.id,
+      bookId: oldDoc.bookId,
+      title: oldDoc.title,
+      kind: oldDoc.kind,
+      chapters: chapters,
+      pages: pages,
+      unit: oldDoc.unit,
+      hint: oldDoc.hint,
+      warnings: [
+        ...oldDoc.warnings,
+        '已把「$title」合并进这本书（同名自动合并），共 ${part.pagesInOrder.length} 页。',
       ],
     );
   }
