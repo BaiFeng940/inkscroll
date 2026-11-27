@@ -1,2 +1,1 @@
-212134b0bbee870ab126c9f8cc802cc4f1bd50877de561b4d5043a6dab295a7e  inkscroll-0.14.1-arm64-v8a.apk
-0bc55f7619264b5ea34619ebeb56cce3cb09af9ed1bf9c7003ac58a2bd12d189  inkscroll-0.14.1-armeabi-v7a.apk
+af7ab505b0457573b86ae0f02b37d2c633214506460a1432164d717e1aaade05  inkscroll-0.15.5-release.apk
